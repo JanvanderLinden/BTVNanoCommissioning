@@ -1,4 +1,5 @@
 import awkward as ak
+import hist
 import numpy as np
 from coffea import processor
 
@@ -327,3 +328,63 @@ def uproot_writeable(events, include=["events", "run", "luminosityBlock"]):
                     ak.to_packed(ak.without_parameters(events[bname][n])), -99
                 )
     return ev
+
+
+def _stack_syst(hs):
+    """One histogram from per-shift histograms whose "syst" categories are
+    disjoint: the categories in the order sequential accumulation gives, the
+    contents copied once. None where this does not apply."""
+    h0 = hs[0]
+    if not all(isinstance(h, hist.Hist) for h in hs) or "syst" not in h0.axes.name:
+        return None
+    i = h0.axes.name.index("syst")
+    ax0 = h0.axes[i]
+    if not (
+        isinstance(ax0, hist.axis.StrCategory)
+        and ax0.traits.growth
+        and not ax0.traits.overflow
+    ):
+        return None
+    cats = []
+    for h in hs:
+        if h.axes.name != h0.axes.name or h.storage_type != h0.storage_type:
+            return None
+        if any(h.axes[j] != h0.axes[j] for j in range(len(h0.axes)) if j != i):
+            return None
+        cats.extend(h.axes[i])
+    if len(set(cats)) != len(cats):
+        return None
+    axes = list(h0.axes)
+    axes[i] = hist.axis.StrCategory(cats, growth=True)
+    axes[i].__dict__.update(ax0.__dict__)  # name and label exactly as stored
+    out = hist.Hist(*axes, storage=h0.storage_type(), name=h0.name, label=h0.label)
+    view, off = out.view(flow=True), 0
+    for h in hs:
+        n = len(h.axes[i])
+        if n:
+            sl = [slice(None)] * view.ndim
+            sl[i] = slice(off, off + n)
+            view[tuple(sl)] = h.view(flow=True)
+        off += n
+    return out
+
+
+def _merge_shifts(items):
+    if all(isinstance(x, dict) for x in items):
+        keys = list(dict.fromkeys(k for x in items for k in x))
+        return {k: _merge_shifts([x[k] for x in items if k in x]) for k in keys}
+    if len(items) > 1:
+        stacked = _stack_syst(items)
+        if stacked is not None:
+            return stacked
+    return processor.accumulate(items)
+
+
+def accumulate_shifts(outputs):
+    """processor.accumulate for the per-shift outputs of one chunk. Each shift
+    fills its own "syst" categories, so a histogram is built once from all
+    shifts instead of by ~30 successive additions (each a copy). Same result."""
+    outputs = [o for o in outputs if o is not None]
+    if len(outputs) < 3:
+        return processor.accumulate(outputs)
+    return _merge_shifts(outputs)
