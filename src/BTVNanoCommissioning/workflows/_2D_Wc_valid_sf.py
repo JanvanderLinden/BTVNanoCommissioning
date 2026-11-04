@@ -175,6 +175,7 @@ class NanoProcessor(processor.ProcessorABC):
             else:
                 iso_lep = events.Muon[(events.Muon.pt > 26) & mu_idiso(events)]
         elif isEle:
+            # intended (2D SF selection): isolated electron |eta| < 1.5
             if self._campaign in [
                 "Summer24",
                 "CustomSummer24",
@@ -441,7 +442,7 @@ class NanoProcessor(processor.ProcessorABC):
         # mask on distance between W_phi and jet_phi abs(deltaPhi(ak4jets[0].phi, Vboson.phi) > 2 (if tight sel)
         jetw_dphi = abs(event_jet_0.delta_phi(Wcand))
         req_dphi_Wjet = jetw_dphi > 2.0
-        # delta Phi between leading jet and lepton
+        # delta Phi between leading jet and lepton; intended (2D SF selection): < 2.8 (was 2.0)
         jetl_dphi = abs(event_jet_0.delta_phi(iso_lep))
         req_jetl_dphi = jetl_dphi < 2.8
 

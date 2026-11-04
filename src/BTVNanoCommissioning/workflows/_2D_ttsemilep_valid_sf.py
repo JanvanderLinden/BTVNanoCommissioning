@@ -212,6 +212,8 @@ class NanoProcessor(processor.ProcessorABC):
         # ctag_DY_valid_sf.py
         jetindx4 = ak.local_index(events.Jet.pt)[jet_sel]
         n_jet = ak.count(event_jet.pt, axis=1)
+        # intended (2D SF selection): 3-4 jets, pT^miss > 50 GeV, mT(W) > 40 GeV and no b-tag
+        # requirement (the tagger score is the fit variable)
         req_jets = (n_jet >= 3) & (n_jet <= 4)
         # req_jets = n_jet >= 4
 
