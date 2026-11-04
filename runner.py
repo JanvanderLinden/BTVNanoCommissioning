@@ -2,6 +2,7 @@ import os
 import sys
 import json
 import argparse
+import shutil
 import time
 import multiprocessing
 from concurrent.futures import ProcessPoolExecutor
@@ -13,6 +14,40 @@ from coffea.util import load, save
 from coffea import processor
 from coffea.nanoevents import PFNanoAODSchema
 from BTVNanoCommissioning.workflows import workflows
+
+
+def local_copy(sample_dict):
+    """xrdcp every remote input file to the job directory: one streaming read
+    instead of many small remote reads. A failed copy keeps the remote path.
+    Returns {local path: remote path}."""
+    import hashlib
+    import subprocess
+
+    names = {}
+    for key, files in sample_dict.items():
+        new = []
+        for path in files:
+            h = hashlib.md5(path.encode()).hexdigest()[:12]
+            dst = os.path.abspath(f"localcopy/{h}/{os.path.basename(path)}")
+            # BTV_LOCALCOPY_KEEP=1: several runner calls in one job share the copies
+            if path.startswith("root://") and not os.path.exists(dst):
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
+                cmd = ["xrdcp", "-f", "-s", path, dst + ".part"]
+                if subprocess.run(cmd).returncode == 0:
+                    os.rename(dst + ".part", dst)
+            if path.startswith("root://") and os.path.exists(dst):
+                names[dst] = path
+                path = dst
+            new.append(path)
+        sample_dict[key] = new
+    return names
+
+
+def restore_file_names(output, names):
+    """Write the remote names back into the per-dataset file bookkeeping."""
+    for d in output.values():
+        if isinstance(d, dict) and "fname" in d:
+            d["fname"] = processor.set_accumulator(names.get(f, f) for f in d["fname"])
 
 
 def validate(file):
@@ -405,6 +440,12 @@ def debug_parser(parser):
     )
     parser.add_argument("--skipbadfiles", action="store_true", help="Skip bad files.")
     parser.add_argument(
+        "--local-copy",
+        dest="local_copy",
+        action="store_true",
+        help="xrdcp the input files to the job directory first (faster for remote data files)",
+    )
+    parser.add_argument(
         "--only", type=str, default=None, help="Only process specific dataset or file"
     )
     parser.add_argument(
@@ -516,6 +557,8 @@ if __name__ == "__main__":
             for key in sample_dict.keys():
                 if args.only in sample_dict[key]:
                     sample_dict = dict([(key, [args.only])])
+
+    local_names = local_copy(sample_dict) if args.local_copy else {}
 
     # Scan if files can be opened
     if args.validate:
@@ -1219,6 +1262,11 @@ if __name__ == "__main__":
                                     ".coffea", f"_{sindex}_{findex}.coffea"
                                 ),
                             )
+    if local_names:
+        restore_file_names(output, local_names)
+        if os.environ.get("BTV_LOCALCOPY_KEEP") != "1":
+            for f in local_names:
+                shutil.rmtree(os.path.dirname(f))
     if not "lxplus" in args.executor:
         if args.noHist == False:
             save(output, coffeaoutput)
