@@ -313,6 +313,26 @@ def config_parser(parser):
             "hooks for frag/decay reweights."
         ),
     )
+    parser.add_argument(
+        "--vjets-stitch",
+        dest="vjets_stitch",
+        default=None,
+        help="correctionlib json (vjets_fxfx_stitch) with the per-event LHE stitching "
+        "factor for the FxFx W/DY samples; off by default.",
+    )
+    parser.add_argument(
+        "--nlo-reweight",
+        dest="nlo_reweight",
+        action="store_true",
+        help="PRISM-PCA negative-weight reweighting of the FxFx W/DY samples (CMS AN-2026/042); off by default.",
+    )
+    parser.add_argument(
+        "--tagger-compare",
+        dest="tagger_compare",
+        action="store_true",
+        help="Book nominal-only logit(score) histograms of UParT, UParT-NoAdv, "
+        "PNet and DeepJet (where stored) for the tagger data/MC comparison",
+    )
     parser.add_argument("--isArray", action="store_true", help="Output root files")
     parser.add_argument(
         "--array-systs",
@@ -605,6 +625,12 @@ if __name__ == "__main__":
                         outf.write(line)
         sys.exit(0)
 
+    if args.nlo_reweight:
+        os.environ["BTV_NLO_REWEIGHT"] = "1"
+    if args.vjets_stitch:
+        # ponytail: env var reaches iterative/futures/condor_lxplus jobs, not dask/parsl workers
+        os.environ["BTV_VJETS_STITCH"] = args.vjets_stitch
+
     # load workflow
     processor_instance = workflows[args.workflow](
         args.year,
@@ -620,6 +646,7 @@ if __name__ == "__main__":
     # __init__: array_writer is the only consumer, and the instance is what
     # gets pickled out to the dask/parsl/condor workers.
     processor_instance.arraySysts = args.array_systs
+    processor_instance.taggerCompare = args.tagger_compare
 
     if args.skip_structure_validation:
         print("Skipping dataset structure validation (--skip-structure-validation).")
