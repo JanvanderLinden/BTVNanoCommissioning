@@ -3169,94 +3169,83 @@ def jmar_sf(jet, correct_map, weights, syst=False):
             weights.add(sf, sfs_all)
 
 
+# Per-event LHE weight ratios (scale, PDF, alpha_S) are capped in MAGNITUDE at
+# this value, sign kept. The normalisation stays exact: every variation is
+# divided downstream by its own sum over all events, built from the same capped
+# weights (reweighting -> sumw_<v>). Measured on one file of each of the 35 MC
+# samples of the lepton workflows: |ratio| > 10 hits at most 0.05 % of events,
+# and the cap lifts the effective statistics of the worst scale variation from
+# 0.39 to 0.82 (W+0j), 0.45 to 0.66 (DY 10-50), 0.62 to 0.77 (WZ->l3nu 4FS). A
+# cap of 5 gains nothing further.
+LHE_RATIO_CAP = 10.0
+
+
+def _cap_lhe_ratio(r):
+    r = np.asarray(r, dtype=np.float64)
+    r = np.where(np.isfinite(r), r, 1.0)
+    return np.clip(r, -LHE_RATIO_CAP, LHE_RATIO_CAP)
+
+
+# PDF sets in these samples (member 0 central, 1..100 Hessian eigenvectors).
+# value = whether members 101/102 are the alpha_S variations (0.116 / 0.120).
+# 325300: 31 of the 35 lepton-workflow samples, 325500 (4FS, no alpha_S): 4.
+# The PDF eigenvectors themselves are NOT booked (decided 2026-09-30): in the
+# final fit the PDF nuisances explained at most 0.84 % of any SF's variance
+# (median 0.07 %), and a correct Hessian treatment needs 100 extra slices per
+# histogram; the former per-event quadrature was not a PDF variation at all.
+_PDF_HESSIAN_SETS = {
+    "306000 - 306102": True,
+    "325300 - 325402": True,
+    "325500 - 325600": False,
+}
+
+
+def _pdf_set(pdf_weights):
+    doc = getattr(pdf_weights, "__doc__", "") or ""
+    return next((k for k in _PDF_HESSIAN_SETS if k in doc), None)
+
+
 def add_pdf_weight(weights, pdf_weights, isSyst=False):
+    """alpha_S only (no PDF eigenvector variation, see _PDF_HESSIAN_SETS).
+    Up = alpha_S 0.120 (member 102), Down = 0.116 (member 101), both relative to
+    the central member and capped. Sets without alpha_S members book a variation
+    equal to the nominal, so the label exists everywhere and the tensor writer
+    drops it as zero response."""
     nom = np.ones(len(weights.weight()))
-    up = np.ones(len(weights.weight()))
-    down = np.ones(len(weights.weight()))
-
-    if pdf_weights is not None:
-        if "306000 - 306102" in pdf_weights.__doc__:
-            # NNPDF31_nnlo_hessian_pdfas
-            # https://lhapdfsets.web.cern.ch/current/NNPDF31_nnlo_hessian_pdfas/NNPDF31_nnlo_hessian_pdfas.info
-
-            # Hessian PDF weights
-            # Eq. 21 of https://arxiv.org/pdf/1510.03865v1.pdf
-            arg = pdf_weights[:, 1:-2] - np.ones((len(weights.weight()), 100))
-            summed = ak.sum(np.square(arg), axis=1)
-            pdf_unc = np.sqrt((1.0 / 99.0) * summed)
-
-            # alpha_S weights
-            # Eq. 27 of same ref
-            as_unc = 0.5 * (pdf_weights[:, 102] - pdf_weights[:, 101])
-
-            # PDF + alpha_S weights
-            # Eq. 28 of same ref
-            pdfas_unc = np.sqrt(np.square(pdf_unc) + np.square(as_unc))
-
-            if isSyst != False:
-                weights.add("PDF_weight", nom, nom + pdf_unc, None)
-                weights.add("aS_weight", nom, nom + as_unc, None)
-                weights.add("PDFaS_weight", nom, nom + pdfas_unc, None)
-            else:
-                weights.add("PDF_weight", nom)
-                weights.add("aS_weight", nom)
-                weights.add("PDFaS_weight", nom)
-
-        elif "325300 - 325402" in pdf_weights.__doc__:
-            # NNPDF31_nnlo_as_0118_mc_hessian_pdfas
-            # https://lhapdfsets.web.cern.ch/current/NNPDF31_nnlo_as_0118_mc_hessian_pdfas/NNPDF31_nnlo_as_0118_mc_hessian_pdfas.info
-
-            # Vectorised equivalent of the per-member loop over iPDF 1..102:
-            # pdf_unc sums members 1..100, pdfas_unc adds member 102 on top.
-            w = ak.to_numpy(pdf_weights).astype(np.float64)
-            rel = w[:, 1:101] / w[:, 0:1] - 1.0
-            pdf_unc = np.sqrt(np.sum(rel * rel, axis=1))
-            pdfas_unc = np.sqrt(pdf_unc**2.0 + (w[:, 102] / w[:, 0] - 1.0) ** 2.0)
-            as_unc_up = pdf_weights[:, 101]
-            as_unc_down = pdf_weights[:, 102]
-
-            if isSyst != False:
-                weights.add("PDF_weight", nom, nom + pdf_unc, nom - pdf_unc)
-                weights.add("aS_weight", nom, as_unc_up, as_unc_down)
-                weights.add("PDFaS_weight", nom, nom + pdfas_unc, nom - pdfas_unc)
-            else:
-                weights.add("PDF_weight", nom)
-                weights.add("aS_weight", nom)
-                weights.add("PDFaS_weight", nom)
-
-        elif "325500 - 325600" in pdf_weights.__doc__:
-            # NNPDF31_nnlo_as_0118_nf_4_mc_hessian
-            # https://lhapdfsets.web.cern.ch/current/NNPDF31_nnlo_as_0118_nf_4_mc_hessian/NNPDF31_nnlo_as_0118_nf_4_mc_hessian.info
-
-            pdf_unc = np.zeros_like(weights.weight(), dtype=np.float64)
-            mean_w = np.mean(pdf_weights, axis=1)
-            for iPDF in range(101):
-                pdf_unc = pdf_unc + ((pdf_weights[:, iPDF] - mean_w) ** 2.0)
-            pdf_unc = np.sqrt(pdf_unc / (101.0 - 1.0))
-            pdfas_unc = pdf_unc
-            as_unc_up = np.ones_like(weights.weight(), dtype=np.float64)
-            as_unc_down = np.ones_like(weights.weight(), dtype=np.float64)
-
-            if isSyst != False:
-                weights.add("PDF_weight", nom, nom + pdf_unc, nom - pdf_unc)
-                weights.add("aS_weight", nom, as_unc_up, as_unc_down)
-                weights.add("PDFaS_weight", nom, nom + pdfas_unc, nom - pdfas_unc)
-            else:
-                weights.add("PDF_weight", nom)
-                weights.add("aS_weight", nom)
-                weights.add("PDFaS_weight", nom)
-
-        else:
-            warnings.warn("unexpected PDF set used!")
-            weights.add("aS_weight", nom, up, down)
-            weights.add("PDF_weight", nom, up, down)
-            weights.add("PDFaS_weight", nom, up, down)
-
+    if isSyst == False:
+        weights.add("aS_weight", nom)
+        return
+    key = _pdf_set(pdf_weights) if pdf_weights is not None else None
+    if key is None:
+        warnings.warn(
+            "PDF weights are not available"
+            if pdf_weights is None
+            else "unexpected PDF set used!"
+        )
+    if key is not None and _PDF_HESSIAN_SETS[key]:
+        w = ak.to_numpy(pdf_weights).astype(np.float64)
+        ref = np.where(w[:, 0] != 0, w[:, 0], 1.0)
+        weights.add(
+            "aS_weight",
+            nom,
+            _cap_lhe_ratio(w[:, 102] / ref),
+            _cap_lhe_ratio(w[:, 101] / ref),
+        )
     else:
-        warnings.warn("PDF weights are not available")
-        weights.add("aS_weight", nom, up, down)
-        weights.add("PDF_weight", nom, up, down)
-        weights.add("PDFaS_weight", nom, up, down)
+        weights.add("aS_weight", nom, nom, nom)
+
+
+VPT_EWK_CAMPAIGNS = ("CustomSummer24", "CustomSummer25")
+
+
+def vpt_ewk_kfactor(vpt, boson):
+    """NLO EWK k-factor vs LHE V pT (fit functions, valid 100 <= pT < 3000 GeV, 1 elsewhere)."""
+    vpt = np.asarray(vpt, dtype=np.float64)
+    if boson == "W":
+        k = -0.830041 + 7.93714 * np.power(vpt + 877.978, -0.213831)
+    else:
+        k = -0.1808051 + 6.04146 * np.power(vpt + 759.098, -0.242556)
+    return np.where((vpt >= 100) & (vpt < 3000), k, 1.0)
 
 
 # https://twiki.cern.ch/twiki/bin/viewauth/CMS/TopPtReweighting#TOP_PAG_corrections_based_on_the
@@ -3917,22 +3906,30 @@ def add_scalevar_weight(weights, lhe_weights, isSyst=False):
     if isSyst != False:
         if len(lhe_weights) > 0:
             if len(lhe_weights[0]) == 9:
-                nom = lhe_weights[:, 4]
-                weights.add(
-                    "scalevar_muR",
-                    nom,
-                    lhe_weights[:, 7] / nom,
-                    lhe_weights[:, 1] / nom,
-                )
-                weights.add(
-                    "scalevar_muF",
-                    nom,
-                    lhe_weights[:, 5] / nom,
-                    lhe_weights[:, 3] / nom,
-                )
-                weights.add(
-                    "scalevar_muR_muF", nom, lhe_weights[:, 0], lhe_weights[:, 8]
-                )
+                # Relative to the nominal ([4], mu_R = mu_F = 1), which genWeight
+                # already contains: the booked factor is 1 and each leg is
+                # [k]/[4]. coffea's Weights takes weightUp/weightDown as the
+                # ABSOLUTE factor and divides by the booked one, so booking
+                # [4] as the factor would multiply the nominal by [4] once per
+                # systematic and divide the legs by [4] twice.
+                # "Up" is the larger scale, for all three: muR [7] (2, 1),
+                # muF [5] (1, 2), muR_muF [8] (2, 2). Legs capped (LHE_RATIO_CAP).
+                ref = lhe_weights[:, 4]
+
+                def leg(k):
+                    return _cap_lhe_ratio(lhe_weights[:, k] / ref)
+
+                weights.add("scalevar_muR", nom, leg(7), leg(1))
+                weights.add("scalevar_muF", nom, leg(5), leg(3))
+                weights.add("scalevar_muR_muF", nom, leg(8), leg(0))
+            elif len(lhe_weights[0]) == 8:
+                # nominal member removed (e.g. TTLNu-1Jets): the 9-entry order without [4], ref = 1
+                def leg8(k):
+                    return _cap_lhe_ratio(lhe_weights[:, k])
+
+                weights.add("scalevar_muR", nom, leg8(6), leg8(1))
+                weights.add("scalevar_muF", nom, leg8(4), leg8(3))
+                weights.add("scalevar_muR_muF", nom, leg8(7), leg8(0))
             elif len(lhe_weights[0]) > 1:
                 print("Scale variation vector has length ", len(lhe_weights[0]))
         else:
