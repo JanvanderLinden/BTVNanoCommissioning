@@ -360,6 +360,18 @@ def _load_SF_impl(year, campaign, selMod="default", syst=False):
 
         ## JME corrections
         elif SF == "JME":
+            # test hook: BTV_JEC_ERA="<cvmfs JME era>:<JEC version>:<JER version>" loads another
+            # era's JEC/JER for MC and all data eras (unset = nominal config)
+            if os.environ.get("BTV_JEC_ERA"):
+                _era, _jec, _jer = os.environ["BTV_JEC_ERA"].split(":")
+                conf = {
+                    **conf,
+                    "JME_path": f"/cvmfs/cms-griddata.cern.ch/cat/metadata/JME/{_era}/latest/jet_jerc.json.gz",
+                    "JME": {
+                        k: f"{_jec} {_jer}" if k == "MC" else _jec for k in conf["JME"]
+                    },
+                }
+                warnings.warn(f"BTV_JEC_ERA test hook: JME {conf['JME']}")
             if "JME_path" in conf and os.path.exists(conf["JME_path"]):
                 # Custom JME path (e.g. preliminary Puppi JEC for Run 2 NanoAODv15)
                 correct_map["JME"] = correctionlib.CorrectionSet.from_file(
@@ -1212,7 +1224,9 @@ def JME_shifts(
 
             # JES/JEC recipe for 2024 (slide 26)
             # https://indico.cern.ch/event/1602054/timetable/?view=standard_inline_minutes#12-jet-performance-in-run-3
-            if year == "2024":
+            # test hook: BTV_JEC_CLIP30=1/0 forces the pT >= 30 GeV evaluation on/off (unset = 2024 only)
+            _clip = os.environ.get("BTV_JEC_CLIP30")
+            if (year == "2024") if _clip is None else (_clip == "1"):
                 tmp_pt = copy.copy(JEC_input[2])
                 tmp_pt = np.clip(tmp_pt, 30, None)
                 JEC_input[2] = tmp_pt
