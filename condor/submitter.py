@@ -88,6 +88,18 @@ def get_condor_submitter_parser(parser):
         help="Number of files proceed per condor job (default: %(default)s)",
     )
     parser.add_argument(
+        "--runsPerJob",
+        type=int,
+        default=None,
+        help="With --configs: close a job when the next file would exceed this "
+        "number of (file, config) runs. --condorFileSize stays the cap on files.",
+    )
+    parser.add_argument(
+        "--disk",
+        default=None,
+        help="request_disk for each condor job (e.g. 10GB), for --local-copy",
+    )
+    parser.add_argument(
         "--outputDir",
         help="Output directory",
         required=True,
@@ -123,7 +135,12 @@ def get_main_parser():
         "--workflow",
         dest="workflow",
         help="Which processor to run",
-        required=True,
+    )
+    parser.add_argument(
+        "--configs",
+        default=None,
+        help="JSON list of runs {workflow, campaign, year, json, outputDir}. A job "
+        "takes a batch of input files and runs each config on its share of them.",
     )
     parser.add_argument(
         "-o",
@@ -151,6 +168,8 @@ def get_main_parser():
             "Summer23BPix",
             "Summer24",
             "CustomSummer24",
+            "CustomSummer24UParTPaper",
+            "CustomSummer25",
             "Prompt25",
             "2018-UL",
             "2017-UL",
@@ -185,6 +204,25 @@ def get_main_parser():
             "'hdamp_ml' applies hdamp ONNX up/down; 'full' additionally reserves "
             "hooks for frag/decay reweights."
         ),
+    )
+    parser.add_argument(
+        "--nlo-reweight",
+        dest="nlo_reweight",
+        action="store_true",
+        help="Forwarded to runner.py --nlo-reweight",
+    )
+    parser.add_argument(
+        "--vjets-stitch",
+        dest="vjets_stitch",
+        default=None,
+        help="Forwarded to runner.py --vjets-stitch: file name in data/STITCH (sandbox) or a path",
+    )
+    parser.add_argument(
+        "--tagger-compare",
+        dest="tagger_compare",
+        action="store_true",
+        help="Book nominal-only logit(score) histograms of UParT, UParT-NoAdv, "
+        "PNet and DeepJet (where stored) for the tagger data/MC comparison",
     )
     parser.add_argument("--isArray", action="store_true", help="Output root files")
     parser.add_argument(
@@ -224,6 +262,12 @@ def get_main_parser():
     )
     parser.add_argument("--skipbadfiles", action="store_true", help="Skip bad files.")
     parser.add_argument(
+        "--local-copy",
+        dest="local_copy",
+        action="store_true",
+        help="Forwarded to runner.py --local-copy (xrdcp inputs to the worker first)",
+    )
+    parser.add_argument(
         "--dryrun",
         action="store_true",
         help="Prepare the tarball, job directory, and submit.jdl but do not actually call condor_submit",
@@ -249,6 +293,12 @@ if __name__ == "__main__":
     # actual histograms/arrays are cp/xrdcp'd directly from the worker node
     # to outputDir. A relative (or otherwise non-shared) outputDir silently
     # writes into the worker's ephemeral scratch space and is lost for good.
+    configs = json.load(open(args.configs)) if args.configs else None
+    if (args.workflow is None) == (configs is None):
+        sys.exit("ERROR: give exactly one of --workflow and --configs")
+    for d in [args.outputDir] + [c["outputDir"] for c in configs or []]:
+        if not (d.startswith("/") or d.startswith("root://")):
+            sys.exit(f"ERROR: --outputDir '{d}' is not an absolute path or root:// URL")
     if not (args.outputDir.startswith("/") or args.outputDir.startswith("root://")):
         print(
             f"ERROR: --outputDir '{args.outputDir}' is not an absolute path or "
@@ -306,6 +356,9 @@ if __name__ == "__main__":
                     "notebooks",
                     "testfile",
                     "__pycache__",
+                    "plot",
+                    "plot_nominal",
+                    "plot_taggercompare",
                 ]
                 + jobdirs,
             )
@@ -326,10 +379,12 @@ if __name__ == "__main__":
 
     ## store parser arguments
     with open(os.path.join(job_dir, "arguments.json"), "w") as json_file:
-        json.dump(vars(args), json_file, indent=4)
+        json.dump({**vars(args), "configs": configs}, json_file, indent=4)
 
     ## split the sample json
-    if isinstance(args.samplejson, str):
+    if configs:
+        samplejson = []
+    elif isinstance(args.samplejson, str):
         samplejson = [args.samplejson]
     else:
         samplejson = args.samplejson
@@ -364,12 +419,40 @@ if __name__ == "__main__":
             }
             counter += 1
 
-    ## store the split sample json file
-    with open(os.path.join(job_dir, "split_samples.json"), "w") as json_file:
-        json.dump(split_sample_dict, json_file, indent=4)
-    ## store the jobnum list (0..jobnum-1)
+    if configs:  # {job: {config index: {dataset: files}}}, split on the union of the files
+        union = {}
+        for i, c in enumerate(configs):
+            for ds, fl in json.load(open(c["json"])).items():
+                for fn in fl:
+                    union.setdefault(ds, {}).setdefault(fn, []).append(str(i))
+        split_sample_dict, counter = {}, 0
+        maxruns = args.runsPerJob or float("inf")
+        for ds, owners in union.items():
+            job, nfiles, nruns = {}, 0, 0
+            for fn, cfgs in owners.items():
+                if nfiles and (
+                    nfiles == args.condorFileSize or nruns + len(cfgs) > maxruns
+                ):
+                    split_sample_dict[counter] = job
+                    counter += 1
+                    job, nfiles, nruns = {}, 0, 0
+                job.setdefault(ds, {})[fn] = cfgs  # each path once, with its configs
+                nfiles, nruns = nfiles + 1, nruns + len(cfgs)
+            split_sample_dict[counter] = job
+            counter += 1
+
+    ## store the split sample json file; with --configs in shards of 100 jobs
+    ## (split/<shard>/split_samples.json), so a job only downloads its own shard
+    shard = (lambda n: n // 100) if configs else (lambda n: None)
+    for k in sorted({shard(n) for n in range(counter)}, key=str):
+        d = job_dir if k is None else os.path.join(job_dir, "split", str(k))
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "split_samples.json"), "w") as json_file:
+            part = {n: j for n, j in split_sample_dict.items() if shard(n) == k}
+            json.dump(part, json_file, indent=None if configs else 4)
+    ## store the jobnum list (0..jobnum-1), with the shard number for --configs
     with open(os.path.join(job_dir, "jobnum_list.txt"), "w") as f:
-        f.write("\n".join([str(i) for i in range(counter)]))
+        f.write("\n".join(f"{i} {shard(i)}" if configs else str(i) for i in range(counter)))
 
     ## Stage the two big sandbox inputs (tarball + split json) to EOS so
     ## condor's xrootd plugin pulls them on the worker. Previously these were
@@ -379,10 +462,19 @@ if __name__ == "__main__":
     ## stay on /afs. .condor_sandbox is dotted so it never matches the
     ## hists_*/arrays_* globs the hadd/plot steps run over outputDir.
     sandbox_url = eos_url(args.outputDir) + "/.condor_sandbox"
-    xrdcp_to_eos(
-        os.path.join(job_dir, "split_samples.json"),
-        f"{sandbox_url}/split_samples.json",
-    )
+    split_url = f"{sandbox_url}/{args.jobName}/split" if configs else sandbox_url
+    if configs:
+        host, path = f"{sandbox_url}/{args.jobName}"[len("root://") :].split("/", 1)
+        subprocess.run(["xrdfs", f"root://{host}", "mkdir", "-p", path], check=True)
+        subprocess.run(
+            ["xrdcp", "-f", "-r", "-s", os.path.join(job_dir, "split"), f"{sandbox_url}/{args.jobName}"],
+            check=True,
+        )
+    else:
+        xrdcp_to_eos(
+            os.path.join(job_dir, "split_samples.json"),
+            f"{sandbox_url}/split_samples.json",
+        )
     if not args.remoteRepo:
         xrdcp_to_eos(
             f"{base_dir}/BTVNanoCommissioning.tar.gz",
@@ -399,6 +491,7 @@ Arguments = $(JOBNUM) $(request_cpus)
 
 request_cpus   = {nCPU}
 request_memory = {request_memory}
+{request_disk}
 use_x509userproxy = true
 
 +JobFlavour = "{jobqueue}"
@@ -420,23 +513,25 @@ transfer_input_files    = {transfer_input_files}
 JobBatchName            = {batch_name}
 transfer_output_files   = .success
 
-Queue JOBNUM from {jobnum_file}
+Queue {queue_vars} from {jobnum_file}
 """.format(
         executable=f"{base_dir}/condor/execute.sh",
         jobqueue=args.jobqueue,
         max_retries=max_retries,
         request_memory=args.memory if args.memory else f"{args.nCPU * 3}GB",
+        request_disk=f"request_disk   = {args.disk}" if args.disk else "",
         accounting_group=(
             f'+AccountingGroup = "{args.accountingGroup}"'
             if args.accountingGroup
             else ""
         ),
         log_dir=f"{base_dir}/{job_dir}/log",
-        transfer_input_files=f"{base_dir}/{job_dir}/arguments.json,{base_dir}/{job_dir}/jobnum_list.txt,{sandbox_url}/split_samples.json"
+        transfer_input_files=f"{base_dir}/{job_dir}/arguments.json,{base_dir}/{job_dir}/jobnum_list.txt,{split_url}{'/$(SHARD)' if configs else ''}/split_samples.json"
         + ("" if args.remoteRepo else f",{sandbox_url}/BTVNanoCommissioning.tar.gz"),
         nCPU=args.nCPU,
         batch_name=args.jobName,
         jobnum_file=f"{base_dir}/{job_dir}/jobnum_list.txt",
+        queue_vars="JOBNUM,SHARD" if configs else "JOBNUM",
     )
     with open(os.path.join(job_dir, "submit.jdl"), "w") as f:
         f.write(jdl_template)
