@@ -61,11 +61,22 @@ class NanoProcessor(processor.ProcessorABC):
         return self._accumulator
 
     def process(self, events):
-        events = missing_branch(events, f"{self._year}_{self._campaign}")
-        sumws = reweighting(events, self.isSyst)
+        events = missing_branch(
+            events,
+            f"{self._year}_{self._campaign}",
+            extra_taggers=(
+                ("PNet", "DeepFlav") if getattr(self, "taggerCompare", False) else ()
+            ),
+        )
+        sumws = reweighting(
+            events,
+            self.isSyst,
+            ttbar_reweights=self.ttbar_reweights,
+            campaign=self._campaign,
+        )
         vetoed_events, shifts = common_shifts(self, events)
 
-        return processor.accumulate(
+        return accumulate_shifts(
             self.process_shift(update(vetoed_events, collections), sumws, name)
             for collections, name in shifts
         )
@@ -95,29 +106,13 @@ class NanoProcessor(processor.ProcessorABC):
                 hist_collections=["common", "fourvec", "ttsemilep_2D"],
                 channel=chn,
                 njet=4,
+                tagger_compare=getattr(self, "taggerCompare", False),
             )
 
         if shift_name is None:
             output["sumw"] = sumws["sumw"]
-            if not isRealData and self.isSyst:
-                if "LHEPdfWeight" in events.fields:
-                    output["PDF_sumwUp"] = sumws["PDF_sumwUp"]
-                    output["PDF_sumwDown"] = sumws["PDF_sumwDown"]
-                    output["aS_sumwUp"] = sumws["aS_sumwUp"]
-                    output["aS_sumwDown"] = sumws["aS_sumwDown"]
-                    output["PDFaS_sumwUp"] = sumws["PDFaS_sumwUp"]
-                    output["PDFaS_sumwDown"] = sumws["PDFaS_sumwDown"]
-                if "LHEScaleWeight" in events.fields:
-                    output["muR_sumwUp"] = sumws["muR_sumwUp"]
-                    output["muR_sumwDown"] = sumws["muR_sumwDown"]
-                    output["muF_sumwUp"] = sumws["muF_sumwUp"]
-                    output["muF_sumwDown"] = sumws["muF_sumwDown"]
-                if "PSWeight" in events.fields:
-                    if len(events.PSWeight[0]) == 4:
-                        output["ISR_sumwUp"] = sumws["ISR_sumwUp"]
-                        output["ISR_sumwDown"] = sumws["ISR_sumwDown"]
-                        output["FSR_sumwUp"] = sumws["FSR_sumwUp"]
-                        output["FSR_sumwDown"] = sumws["FSR_sumwDown"]
+            # one sum per generator-level variation, see correction.reweighting
+            output.update({k: v for k, v in sumws.items() if k.startswith("sumw_")})
 
         ####################
         #    Selections    #
@@ -282,6 +277,7 @@ class NanoProcessor(processor.ProcessorABC):
             self.SF_map,
             self.isSyst,
             ttbar_reweights=self.ttbar_reweights,
+            campaign=self._campaign,
         )
         # Configure systematics
         if shift_name is None:
