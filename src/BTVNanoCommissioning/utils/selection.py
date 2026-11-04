@@ -21,7 +21,61 @@ def HLT_helper(events, triggers):
     return req_trig
 
 
+_SEL_CACHE = {}
+
+
+def _coll_fingerprint(coll, fields=("pt", "eta", "phi")):
+    """Identity of an object collection for the selection caches: counts and the
+    kinematics. The JES/JER and lepton-scale shifts change only pt (and mass), so
+    equal fingerprints mean the same objects with the same ID inputs."""
+    parts = [hash(ak.to_numpy(ak.num(coll)).tobytes())]
+    for f in fields:
+        parts.append(hash(ak.to_numpy(ak.flatten(coll[f], axis=None)).tobytes()))
+    return tuple(parts)
+
+
+def _cached(key, compute):
+    """Small cache (last 16 results) for selection masks repeated in every shift."""
+    if key not in _SEL_CACHE:
+        if len(_SEL_CACHE) >= 16:
+            _SEL_CACHE.pop(next(iter(_SEL_CACHE)))
+        _SEL_CACHE[key] = compute()
+    return _SEL_CACHE[key]
+
+
+def _chunk(events):
+    m = getattr(events, "metadata", None) or {}
+    return (m.get("filename"), m.get("entrystart"))
+
+
+_JETID_CACHE = {}
+
+
+def _jet_fingerprint(events, campaign):
+    # same chunk and the same jets (JES/JER shifts change only pt and mass)
+    m = getattr(events, "metadata", None) or {}
+    eta = ak.to_numpy(ak.flatten(events.Jet.eta))
+    phi = ak.to_numpy(ak.flatten(events.Jet.phi))
+    return (
+        m.get("filename"),
+        m.get("entrystart"),
+        campaign,
+        hash(ak.to_numpy(ak.num(events.Jet)).tobytes()),
+        hash(eta.tobytes()),
+        hash(phi.tobytes()),
+    )
+
+
 def jet_id(events, campaign, max_eta=2.5, min_pt=20):
+    key = _jet_fingerprint(events, campaign)
+    if key not in _JETID_CACHE:
+        _JETID_CACHE.clear()
+        _JETID_CACHE[key] = _jet_id_flags(events, campaign)
+    jetid = _JETID_CACHE[key]
+    return (events.Jet.pt > min_pt) & (abs(events.Jet.eta) <= max_eta) & (jetid)
+
+
+def _jet_id_flags(events, campaign):
     # Run 3 NanoAODs have a bug in jetId
     # Implement fix from:
     # https://twiki.cern.ch/twiki/bin/viewauth/CMS/JetID13p6TeV#nanoAOD_Flags
@@ -166,17 +220,21 @@ def jet_id(events, campaign, max_eta=2.5, min_pt=20):
     else:
         jetid = events.Jet.jetId >= 5
 
-    jetid = ak.values_astype(jetid, bool)
-
-    jetmask = (events.Jet.pt > min_pt) & (abs(events.Jet.eta) <= max_eta) & (jetid)
-
-    return jetmask
+    return ak.values_astype(jetid, bool)
 
 
 def _ele_etaSC(events, campaign):
     return (
         events.Electron.eta + events.Electron.deltaEtaSC
-        if campaign not in ["Summer24", "CustomSummer24", "Winter25", "Prompt25"]
+        if campaign
+        not in [
+            "Summer24",
+            "CustomSummer24",
+            "CustomSummer24UParTPaper",
+            "CustomSummer25",
+            "Winter25",
+            "Prompt25",
+        ]
         else events.Electron.superclusterEta
     )
 
@@ -271,10 +329,24 @@ def jet_cut(events, campaign, ptmin=180, ptmax=1e5, absetamin=0, absetamax=2.5):
 
 def MET_filters(events, campaign):
     # apply MET filter
-    metfilter = ak.ones_like(events.run, dtype=bool)
     isRealData = not hasattr(events, "genWeight")
-    for flag in met_filters[campaign]["data" if isRealData else "mc"]:
-        metfilter = events.Flag[flag] & metfilter
+
+    def flags():
+        metfilter = ak.ones_like(events.run, dtype=bool)
+        for flag in met_filters[campaign]["data" if isRealData else "mc"]:
+            metfilter = events.Flag[flag] & metfilter
+        return metfilter
+
+    # event-level flags: the same in every JES/JER shift of a chunk
+    events_id = (
+        hash(ak.to_numpy(events.luminosityBlock).tobytes()),
+        hash(ak.to_numpy(events.event).tobytes()),
+    )
+    metfilter = _cached(
+        ("met_flags", campaign, isRealData, _chunk(events), events_id), flags
+    )
+    if not ak.any((events.run >= 362433) & (events.run <= 367144)):
+        return metfilter  # ecalBadCalibFilter below is False outside these runs
     ## Flag_ecalBadCalibFilter
     badjet = (
         (events.Jet.pt > 50)
