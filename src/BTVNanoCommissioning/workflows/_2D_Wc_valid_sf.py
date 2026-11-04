@@ -1,3 +1,5 @@
+import itertools
+
 import awkward as ak, numpy as np
 from coffea import processor
 from coffea.nanoevents.methods import nanoaod
@@ -10,6 +12,7 @@ from BTVNanoCommissioning.utils.correction import (
     reweighting,
 )
 from BTVNanoCommissioning.helpers.func import (
+    accumulate_shifts,
     update,
     dump_lumi,
     PFCand_link,
@@ -19,6 +22,7 @@ from BTVNanoCommissioning.helpers.func import (
 from BTVNanoCommissioning.helpers.update_branch import missing_branch
 from BTVNanoCommissioning.utils.histogramming.histogrammer import (
     histogrammer,
+    replay_fills,
 )
 from BTVNanoCommissioning.utils.histogramming.histograms.sf2d import (
     SCHEMES as SF2D_SCHEMES,
@@ -33,6 +37,8 @@ from BTVNanoCommissioning.utils.selection import (
     ele_mvatightid,
     MET_filters,
     softmu_mask,
+    fineflav,
+    jet_veto_lepton_clean,
 )
 
 
@@ -112,6 +118,10 @@ class NanoProcessor(processor.ProcessorABC):
             isolepdz, isolepdxy, isolepsip3d = 0.02, 0.01, 2.5
         else:
             raise ValueError(self.selMod, "is not a valid selection modifier.")
+        # Run 2 parity for the 2D SF selections: tighter soft-muon/jet pT
+        # ratio in both channels
+        if self.selMod in ["WcM_2D", "WcE_2D"]:
+            muonpTratioCut = 0.5
 
         output = {}
         if not self.noHist:
@@ -156,6 +166,8 @@ class NanoProcessor(processor.ProcessorABC):
             if self._campaign in [
                 "Summer24",
                 "CustomSummer24",
+                "CustomSummer24UParTPaper",
+                "CustomSummer25",
                 "Winter25",
                 "Prompt25",
             ]:  # NanoAODv15
@@ -166,15 +178,21 @@ class NanoProcessor(processor.ProcessorABC):
             if self._campaign in [
                 "Summer24",
                 "CustomSummer24",
+                "CustomSummer24UParTPaper",
+                "CustomSummer25",
                 "Winter25",
                 "Prompt25",
             ]:  # NanoAODv15
                 iso_lep = events.Electron[
-                    (events.Electron.pt > 32) & ele_promptmvaid(events, self._campaign)
+                    (events.Electron.pt > 32)
+                    & (abs(events.Electron.eta) < 1.5)
+                    & ele_promptmvaid(events, self._campaign)
                 ]
             else:
                 iso_lep = events.Electron[
-                    (events.Electron.pt > 32) & ele_mvatightid(events, self._campaign)
+                    (events.Electron.pt > 32)
+                    & (abs(events.Electron.eta) < 1.5)
+                    & ele_mvatightid(events, self._campaign)
                 ]
         req_lep = ak.count(iso_lep.pt, axis=1) == 1
 
@@ -203,9 +221,13 @@ class NanoProcessor(processor.ProcessorABC):
         """
 
         ## Jet cuts
+        # additional cleaning against the loose veto-lepton collections
+        # (Run 2 parity); None-handling documented in jet_veto_lepton_clean.
+        req_clean_veto = jet_veto_lepton_clean(events, self._campaign)
         jet_sel = ak.fill_none(
             jet_id(events, self._campaign, min_pt=25)
-            & (ak.all(events.Jet.metric_table(iso_lep) > 0.5, axis=2)),
+            & (ak.all(events.Jet.metric_table(iso_lep) > 0.4, axis=2))
+            & req_clean_veto,
             False,
             axis=-1,
         )
@@ -316,6 +338,8 @@ class NanoProcessor(processor.ProcessorABC):
         if self._campaign in [
             "Summer24",
             "CustomSummer24",
+            "CustomSummer24UParTPaper",
+            "CustomSummer25",
             "Winter25",
             "Prompt25",
         ]:  # NanoAODv15
@@ -325,6 +349,8 @@ class NanoProcessor(processor.ProcessorABC):
         if self._campaign in [
             "Summer24",
             "CustomSummer24",
+            "CustomSummer24UParTPaper",
+            "CustomSummer25",
             "Winter25",
             "Prompt25",
         ]:  # NanoAODv15
@@ -371,6 +397,10 @@ class NanoProcessor(processor.ProcessorABC):
         req_metfilter = MET_filters(events, self._campaign)
         event_jet_0 = ak.pad_none(event_jet, 1, axis=1)
         event_jet_0 = event_jet_0[:, 0]
+        # leading soft muon inside the selected jet (c purity of OS-SS ~78 % -> ~92 %)
+        req_softmu_injet = ak.fill_none(
+            event_jet_0.delta_r(soft_muon[:, 0]) <= 0.4, False
+        )
         req_met_pt = MET.pt > 30.0
         jetmet_dphi = abs(event_jet_0.delta_phi(MET))
         req_jetmet_dphi = jetmet_dphi > 1.0
@@ -413,7 +443,7 @@ class NanoProcessor(processor.ProcessorABC):
         req_dphi_Wjet = jetw_dphi > 2.0
         # delta Phi between leading jet and lepton
         jetl_dphi = abs(event_jet_0.delta_phi(iso_lep))
-        req_jetl_dphi = jetl_dphi < 2.0
+        req_jetl_dphi = jetl_dphi < 2.8
 
         # ==This is the manual calculation for transverse mass==
         """
@@ -429,6 +459,7 @@ class NanoProcessor(processor.ProcessorABC):
             & req_lep
             & req_jets
             & req_softmu
+            & req_softmu_injet
             & req_dilepmass
             & req_mtw
             & req_metfilter
@@ -442,6 +473,7 @@ class NanoProcessor(processor.ProcessorABC):
             & req_muNeEmSum
             & req_muEF
             & req_softmu_pt
+            & req_pTratio
             & req_mtw_max120
         )
 
@@ -520,6 +552,9 @@ class NanoProcessor(processor.ProcessorABC):
             svmass, svd3dsig = SV_link(events, event_level, jetindx1)
             pruned_ev["MuonJet", "svmass"] = svmass
             pruned_ev["MuonJet", "svd3dsig"] = svd3dsig
+        if not isRealData and "nBHadrons" in pruned_ev.SelJet.fields:
+            pruned_ev["SelJet", "fineFlav"] = fineflav(pruned_ev.SelJet)
+            pruned_ev["MuonJet", "fineFlav"] = fineflav(pruned_ev.MuonJet)
         pruned_ev["SoftMuon"] = ssmu
         pruned_ev["OtherJets"] = sotherjets
         pruned_ev["MET_pt"] = smet.pt
@@ -616,16 +651,12 @@ class NanoProcessor(processor.ProcessorABC):
         #  Fill histogram  #
         ####################
 
-        for syst in systematics:
-            if self.isSyst == False and syst != "nominal":
-                break
-            if self.noHist:
-                break
-            weight = (
-                weights.weight()
-                if syst == "nominal" or syst == shift_name
-                else weights.weight(modifier=syst)
-            )
+        def weight_for(syst):
+            if syst == "nominal" or syst == shift_name:
+                return weights.weight()
+            return weights.weight(modifier=syst)
+
+        def fill_all(output, weight, syst):
             syst = np.full(len(weight), syst)
             for histname, h in output.items():
                 if (
@@ -836,6 +867,14 @@ class NanoProcessor(processor.ProcessorABC):
                         weight=weight,
                         **{var: flatten(muon_jet[var])},
                     )
+
+        if not self.noHist:
+            systs = list(
+                itertools.takewhile(
+                    lambda s: not (self.isSyst == False and s != "nominal"), systematics
+                )
+            )
+            replay_fills(output, fill_all, systs, weight_for, len(weights.weight()))
 
         #######################
         #  Create root files  #
