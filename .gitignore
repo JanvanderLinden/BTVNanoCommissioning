@@ -30,4 +30,6 @@ BTVNanoCommissioning.tar.gz
 .sites_map.json
 test_my_samples_file_status.txt
 # Agent/editor state
-.claude/
+.claude/# NLORW model files are on EOS (SFbc-2D/scripts/prod/README_V5.md)
+/src/BTVNanoCommissioning/data/NLORW/
+submit_*.log
