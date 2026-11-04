@@ -30,7 +30,7 @@ def _get_2d_mapping_array(campaign, tagger):
     return mapping_arr
 
 
-def missing_branch(events, campaign=None):
+def missing_branch(events, campaign=None, extra_taggers=()):
     """
     Add missing branches or rename branches in the `events` object.
 
@@ -185,7 +185,9 @@ def missing_branch(events, campaign=None):
         "btagNoPIDParTAK4probs",
     )
 
-    for tagger in ("UParTAK4", "NoPIDParTAK4"):
+    # extra_taggers (e.g. PNet, DeepFlav) only for the tagger comparison: adding
+    # them by default would change the booked histograms of central campaigns.
+    for tagger in ("UParTAK4", "UParTAK4NoAdv", "NoPIDParTAK4") + tuple(extra_taggers):
         bvc_name = f"btag{tagger}BvC"
         cvb_name = f"btag{tagger}CvB"
         base_bvc = None
@@ -312,6 +314,10 @@ def missing_branch(events, campaign=None):
                 update_map[f"{hfvlf_name}_pt120toinf"] = jets[
                     f"{hfvlf_name}_pt120toinf"
                 ]
+                # Keep the pure c and s class scores (not stored in NanoAOD).
+                if tagger == "UParTAK4NoAdv":
+                    update_map[f"btag{tagger}C"] = jets[f"btag{tagger}C"]
+                    update_map[f"btag{tagger}S"] = jets[f"btag{tagger}S"]
                 events["Jet"] = update(events.Jet, update_map)
 
         elif tagger == "NoPIDParTAK4":
@@ -438,7 +444,7 @@ def missing_branch(events, campaign=None):
                 and hasattr(events.Jet, bvc_name)
                 # 2D WP boundaries aren't calibrated for every (campaign,
                 # tagger) pair -- skip rather than KeyError.
-                and wp_key in btag_wp_dict.get(campaign, {})
+                and "2D" in btag_wp_dict.get(campaign, {}).get(wp_key, {})
             ):
                 jets = events.Jet
                 hfvlf = ak.flatten(jets[hfvlf_name])

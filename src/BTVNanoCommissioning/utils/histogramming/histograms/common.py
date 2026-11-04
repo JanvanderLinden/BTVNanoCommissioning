@@ -1,3 +1,5 @@
+import re
+
 import hist as Hist
 
 from BTVNanoCommissioning.utils.histogramming import hist_helpers
@@ -271,4 +273,47 @@ def _get_discriminators(axes, **kwargs):
                         Hist.storage.Weight(),
                     )
 
+    # Tagger data/MC comparison (runner --tagger-compare): every stored score
+    # matching _LOGIT_RE on a fine logit axis, so tails can be rebinned offline;
+    # nominal only (histo_writer skips "_logit_" for shifts).
+    if kwargs.get("tagger_compare", False):
+        for d in jet_fields:
+            if _LOGIT_RE.fullmatch(d):
+                for i in range(njet):
+                    hists[f"{d}_logit_{i}"] = Hist.Hist(
+                        *common_axes,
+                        Hist.axis.Regular(
+                            600, -14, 16, name="discr", label=f"logit({d})"
+                        ),
+                        Hist.storage.Weight(),
+                    )
+        for t1, t2, d in (
+            ("UParTAK4", "UParTAK4NoAdv", "HFvLF"),
+            ("UParTAK4", "UParTAK4NoAdv", "BvC"),
+            ("UParTAK4", "PNet", "HFvLF"),
+            ("UParTAK4", "PNet", "BvC"),
+            ("UParTAK4", "DeepFlav", "HFvLF"),
+            ("UParTAK4", "DeepFlav", "BvC"),
+            ("UParTAK4", "DeepFlav", "B"),
+        ):
+            if {f"btag{t1}{d}", f"btag{t2}{d}"} <= set(jet_fields):
+                for i in range(njet):
+                    hists[f"btagVs_{t1}_{t2}_{d}_logit_{i}"] = Hist.Hist(
+                        *common_axes,
+                        Hist.axis.Regular(
+                            52, -12, 14, name="t1", label=f"logit({t1} {d})"
+                        ),
+                        Hist.axis.Regular(
+                            52, -12, 14, name="t2", label=f"logit({t2} {d})"
+                        ),
+                        Hist.storage.Weight(),
+                    )
+
     return hists
+
+
+_LOGIT_RE = re.compile(
+    r"btag(UParTAK4|UParTAK4NoAdv|PNet|DeepFlav)(HFvLF|BvC)(_pt\d+to(\d+|inf))?"
+    r"|btag(UParTAK4|UParTAK4NoAdv|PNet)(B|CvL|CvB|CvNotB|QvG)"
+    r"|btagDeepFlav(B|CvL|CvB|QG)"
+)

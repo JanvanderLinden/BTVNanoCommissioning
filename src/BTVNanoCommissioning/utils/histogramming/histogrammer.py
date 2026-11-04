@@ -564,12 +564,30 @@ def histo_writter(pruned_ev, output, weights, systematics, isSyst, SF_map):
                             )
                         else:
                             flav, seljet, wgt, fsyst = flavs, seljets, weight, syst
-                        h.fill(
-                            syst=fsyst,
-                            flav=flav,
-                            discr=seljet[histname.replace(f"_{i}", "")],
-                            weight=wgt,
-                        )
+                        field = histname.replace(f"_{i}", "")
+                        if field.startswith("btagVs_"):
+                            _, t1, t2, d, _ = field.split("_")
+                            h.fill(
+                                syst=fsyst,
+                                flav=flav,
+                                t1=_logit(seljet[f"btag{t1}{d}"]),
+                                t2=_logit(seljet[f"btag{t2}{d}"]),
+                                weight=wgt,
+                            )
+                        elif field.endswith("_logit"):
+                            h.fill(
+                                syst=fsyst,
+                                flav=flav,
+                                discr=_logit(seljet[field[: -len("_logit")]]),
+                                weight=wgt,
+                            )
+                        else:
+                            h.fill(
+                                syst=fsyst,
+                                flav=flav,
+                                discr=seljet[field],
+                                weight=wgt,
+                            )
                 elif histname in seljets.fields:
                     # No jet index suffix (nj=1) - fill directly
                     discr = seljets[histname]
