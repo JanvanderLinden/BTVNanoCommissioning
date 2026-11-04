@@ -3274,6 +3274,23 @@ def top_pT_reweighting(gen):
     )
 
 
+def _top_pt_weight_from_branch(ev, runs_sumw):
+    """
+    Central top-pT correction from the stored `TopPtWeight[1]` (13.6 TeV) branch,
+    normalised by the per-file Runs sum. `None` when the branch is absent, so callers can
+    fall back to `top_pT_reweighting`. Guards per event against non-finite/non-positive
+    entries (the sibling `TOPMLWeight` branch uses -1 as a non-ttbar sentinel; `TopPtWeight`
+    doesn't, but the guard is cheap and keeps this safe if ever reached off a ttbar sample).
+    """
+    if "TopPtWeight" not in ev.fields:
+        return None
+    w = ak.to_numpy(ev.TopPtWeight[:, 1])
+    valid = np.isfinite(w) & (w > 0)
+    sumw = runs_sumw_norm(runs_sumw or {}, "TopPtWeightSumw", 2)
+    central = w / sumw[1] if sumw is not None else w
+    return np.where(valid, central, 1.0)
+
+
 def _get_hdamp_ml_sessions(campaign):
     cache_key = f"hdamp::{campaign}"
     if cache_key in _TTBAR_REWEIGHT_CACHE:
@@ -3333,7 +3350,7 @@ def _get_hdamp_ml_sessions(campaign):
 _HDAMP_MASS_NORM = 243.9517
 
 
-def add_hdamp_ml_weight(weights, pruned_ev, campaign, isSyst=False):
+def add_hdamp_ml_weight(weights, pruned_ev, campaign, isSyst=False, runs_sumw=None):
     nom = np.ones(len(weights.weight()), dtype=np.float64)
     n = len(nom)
 
@@ -3342,6 +3359,18 @@ def add_hdamp_ml_weight(weights, pruned_ev, campaign, isSyst=False):
             weights.add("hdampML", nom, up, dn)
         else:
             weights.add("hdampML", nom)
+
+    if "TOPMLWeight" in pruned_ev.fields:
+        # TOPMLWeight[1]/[3] = hdamp up/down at 13.6 TeV. Non-ttbar samples fill this
+        # branch with -1 sentinels (not NaN-safe), so a field-presence check alone isn't a
+        # ttbar guard: reject any non-finite/non-positive entry per event before using it.
+        topml = ak.to_numpy(pruned_ev.TOPMLWeight)
+        raw_up, raw_dn = topml[:, 1], topml[:, 3]
+        valid = np.isfinite(raw_up) & (raw_up > 0) & np.isfinite(raw_dn) & (raw_dn > 0)
+        sumw = runs_sumw_norm(runs_sumw or {}, "TOPMLWeightSumw", 7)
+        up = raw_up / sumw[1] if sumw is not None else raw_up
+        dn = raw_dn / sumw[3] if sumw is not None else raw_dn
+        return _add(np.where(valid, up, 1.0), np.where(valid, dn, 1.0))
 
     if "GenPart" not in pruned_ev.fields:
         warnings.warn("GenPart missing; hdamp ML weights set to nominal.", stacklevel=2)
@@ -3695,7 +3724,219 @@ def _find_top_hadron_pair(pdg_a, mother_a, status_a, pt_a, mass_a, hadron_ids_ar
     return tidx, w_m, hid, h_sl, aidx, aw_m, ahid, ah_sl
 
 
-def add_fragmentation_decay_weights(weights, pruned_ev, isSyst=False):
+def _safe_ratio(num, den):
+    """num/den, guarded against non-finite/zero denominators and clamped to a sane range."""
+    with np.errstate(divide="ignore", invalid="ignore"):
+        r = num / den
+    return np.where(np.isfinite(r) & (r > 0) & (r < 100), r, 1.0)
+
+
+def _add_fragdecay_from_branches(
+    weights, pruned_ev, isSyst, runs_sumw, LABELS, nom, _commit
+):
+    """
+    Central + variations from the stored `bFragAndDecayWeight`/`cFragAndDecayWeight`
+    branches of the custom NanoTuples. Filled in GenWeightsTableProducer as a product
+    over particle-level jets of the per-jet weights of BFragmentationWeightProducer
+    (tthcc-run-3/BFragmentationAnalyzer):
+
+        [0] fragCP5BLVsPt        central fragmentation tune  -> the nominal
+        [1] fragCP5BLupVsPt      replaces [0]
+        [2] fragCP5BLdownVsPt    replaces [0]
+        [3] fragCP5PetersonVsPt  replaces [0]
+        [4] semilepbrup          MULTIPLIES [0]; does not contain it
+        [5] semilepbrdown        MULTIPLIES [0]; does not contain it
+
+    So on top of the nominal the fragmentation variations are [k]/[0], while the
+    decay variations are [4] and [5] themselves. Dividing those by [0] as well puts
+    the INVERSE central fragmentation weight into both decay legs, which makes them
+    move the same way (measured on TTto2L2Nu: 89 % of events same-sign with /[0],
+    4 % without). The central entry and every variation are normalised with the
+    per-file Runs-tree sums, so the systematics are acceptance-only.
+    """
+    b = ak.to_numpy(pruned_ev.bFragAndDecayWeight)
+    c = ak.to_numpy(pruned_ev.cFragAndDecayWeight)
+
+    b_sumw = runs_sumw_norm(runs_sumw or {}, "BFragAndDecayWeightSumw", 6)
+    c_sumw = runs_sumw_norm(runs_sumw or {}, "CFragAndDecayWeightSumw", 6)
+    b_central = b[:, 0] / b_sumw[0] if b_sumw is not None else b[:, 0]
+    c_central = c[:, 0] / c_sumw[0] if c_sumw is not None else c[:, 0]
+    b_central = np.where(np.isfinite(b_central) & (b_central > 0), b_central, 1.0)
+    c_central = np.where(np.isfinite(c_central) & (c_central > 0), c_central, 1.0)
+    weights.add("bFragDecayCentral", b_central)
+    weights.add("cFragDecayCentral", c_central)
+
+    # Normalise each variation to its own inclusive sum so the systematic is
+    # acceptance-only. Fragmentation: [k]/[0] carries Sumw[k]/Sumw[0], divide it
+    # out. Decay: w*[0]*[4] has inclusive sum Sumw[0]*Sumw[4] to 0.004 %
+    # (measured on TTto2L2Nu; the two weights are independent), and the nominal
+    # already divides by Sumw[0], so the decay factor is [4]/Sumw[4].
+    bN = b_sumw[0] / b_sumw if b_sumw is not None else np.ones(6)
+    cN = c_sumw[0] / c_sumw if c_sumw is not None else np.ones(6)
+    bD = 1.0 / b_sumw if b_sumw is not None else np.ones(6)
+    cD = 1.0 / c_sumw if c_sumw is not None else np.ones(6)
+    bfu, bfd = (
+        _safe_ratio(b[:, 1], b[:, 0]) * bN[1],
+        _safe_ratio(b[:, 2], b[:, 0]) * bN[2],
+    )
+    # Peterson is ONE alternative model, not a +-1 sigma pair. The old down leg
+    # 1/up was not normalised: E[1/x] > 1/E[x] gave +4.7 % inclusive yield for b
+    # on TTto2L2Nu, with per-event weights up to 32. The down leg is now the
+    # nominal; rabbit_write_tensor.py mirrors one-sided templates at histogram
+    # level, where the bin sums are well behaved.
+    bpu = _safe_ratio(b[:, 3], b[:, 0]) * bN[3]
+    bpd = np.ones_like(bpu)
+    bdu, bdd = (
+        _safe_ratio(b[:, 4], 1.0) * bD[4],
+        _safe_ratio(b[:, 5], 1.0) * bD[5],
+    )
+    cfu, cfd = (
+        _safe_ratio(c[:, 1], c[:, 0]) * cN[1],
+        _safe_ratio(c[:, 2], c[:, 0]) * cN[2],
+    )
+    cpu = _safe_ratio(c[:, 3], c[:, 0]) * cN[3]
+    cpd = np.ones_like(cpu)
+    cdu, cdd = (
+        _safe_ratio(c[:, 4], 1.0) * cD[4],
+        _safe_ratio(c[:, 5], 1.0) * cD[5],
+    )
+
+    _commit(
+        [
+            (bfu, bfd),
+            (bpu, bpd),
+            (cfu, cfd),
+            (cpu, cpd),
+            (bdu, bdd),
+            (cdu, cdd),
+        ]
+    )
+    if isSyst is not False:
+        _add_decay_species_weights(weights, b[:, 4], b[:, 5], "b")
+        _add_decay_species_weights(weights, c[:, 4], c[:, 5], "c")
+
+
+# Hadron species of the semileptonic-BR weights (BFragmentationWeightProducer.cc
+# l. 168-186 evaluates the graphs only for these; any other hadron gets 1.0).
+_DECAY_SPECIES = {
+    "b": (("B0", 511), ("Bplus", 521), ("Bs", 531), ("Lb", 5122)),
+    "c": (("Dplus", 411), ("D0", 421), ("Ds", 431), ("Lc", 4122)),
+}
+# at most one weighted hadron per particle-level jet (the leading ghost hadron)
+_DECAY_MAX_HADRONS = {"b": 6, "c": 8}
+# The NanoTuple stores these weights with a reduced mantissa: 1.1182555 is read
+# back as 1.11823. Measured on TTto2L2Nu (40k events): every event matches a
+# table point within 5.3e-5 in log (L1 over the two legs), so 1.5e-4 accepts all.
+# 19 of 40k b events have a second match within that distance, all with >= 3
+# weighted hadrons (e.g. 2 B0 sl + 1 B0 vs 2 B+ sl + 2 B+); the fewest-hadrons
+# assignment is taken.
+_DECAY_LOG_TOL = 1e-4
+_DECAY_LOG_ACCEPT = 1.5e-4
+
+
+def _decay_decomposition_table(flav):
+    """All hadron-count vectors over the 8 (species x semileptonic) categories
+    with at most _DECAY_MAX_HADRONS hadrons, and their log products under the
+    up and the down graph, keyed on the rounded pair of log products."""
+    key = f"decay_table::{flav}"
+    if key in _TTBAR_REWEIGHT_CACHE:
+        return _TTBAR_REWEIGHT_CACHE[key]
+    import itertools
+
+    pkg = "BTVNanoCommissioning.data.TTBAR_REWEIGHT.frag_decay"
+    with importlib.resources.path(pkg, f"{flav}decayweights.root") as p:
+        with uproot.open(str(p)) as fh:
+            graphs = {
+                leg: dict(
+                    zip(
+                        fh[name].values("x").astype(int),
+                        fh[name].values("y").astype(np.float64),
+                    )
+                )
+                for leg, name in (("up", "semilepbrup"), ("dn", "semilepbrdown"))
+            }
+    cats = [(sp, pid, sl) for sp, pid in _DECAY_SPECIES[flav] for sl in (True, False)]
+    # the producer stores the per-jet weights as float
+    lu = np.log([np.float32(graphs["up"][pid if sl else -pid]) for _, pid, sl in cats])
+    ld = np.log([np.float32(graphs["dn"][pid if sl else -pid]) for _, pid, sl in cats])
+    counts = np.array(
+        [
+            np.bincount(np.array(combo, dtype=np.int64), minlength=len(cats))
+            for tot in range(_DECAY_MAX_HADRONS[flav] + 1)
+            for combo in itertools.combinations_with_replacement(range(len(cats)), tot)
+        ],
+        dtype=np.int64,
+    )
+    L4, L5 = counts @ lu, counts @ ld
+    lookup = {}
+    for i, (a, b) in enumerate(zip(L4, L5)):
+        lookup.setdefault(
+            (int(round(a / _DECAY_LOG_TOL)), int(round(b / _DECAY_LOG_TOL))), []
+        ).append(i)
+    table = (cats, counts, L4, L5, lu, ld, lookup)
+    _TTBAR_REWEIGHT_CACHE[key] = table
+    return table
+
+
+def _add_decay_species_weights(weights, w_up, w_dn, flav):
+    """One nuisance per hadron species, `<flav>decay_<species>`, IN ADDITION to
+    the combined `<flav>decay`.
+
+    The stored per-event `[4]`/`[5]` are products over jets of per-hadron graph
+    values, a small discrete set, so each event decomposes exactly into counts
+    of (species, semileptonic) hadrons. Every species then gets its own weight:
+    the product of its hadrons' up-graph (down-graph) values. The graphs are
+    one-sided per species (buildBRweights.py moves a species only where PDG +-
+    sigma leaves the Pythia BR), so for B0, B+, Ds, Lambda_c only the down
+    graph and for Lambda_b only the up graph moves; the missing leg is the
+    per-event log mirror 1/w. Normalisation is done downstream with the
+    per-variation sums (reweighting -> scaleSumW), so the mirror carries no
+    yield bias. Events that do not decompose (more hadrons than the table, or a
+    corrupted weight) keep 1.0 for every species; the rate is reported."""
+    cats, counts, L4, L5, lu, ld, lookup = _decay_decomposition_table(flav)
+    l4 = np.log(np.where(np.isfinite(w_up) & (w_up > 0), w_up, 1.0))
+    l5 = np.log(np.where(np.isfinite(w_dn) & (w_dn > 0), w_dn, 1.0))
+    n = np.zeros((len(l4), len(cats)), dtype=np.int64)
+    bad = 0
+    k4 = np.rint(l4 / _DECAY_LOG_TOL).astype(np.int64)
+    k5 = np.rint(l5 / _DECAY_LOG_TOL).astype(np.int64)
+    for i in range(len(l4)):
+        best, bestkey = None, None
+        for d4 in (-2, -1, 0, 1, 2):
+            for d5 in (-2, -1, 0, 1, 2):
+                for j in lookup.get((int(k4[i]) + d4, int(k5[i]) + d5), ()):
+                    dist = abs(L4[j] - l4[i]) + abs(L5[j] - l5[i])
+                    if dist > _DECAY_LOG_ACCEPT:
+                        continue
+                    key = (int(counts[j].sum()), dist)
+                    if bestkey is None or key < bestkey:
+                        best, bestkey = j, key
+        if best is None:
+            bad += 1
+            continue
+        n[i] = counts[best]
+    if bad:
+        warnings.warn(
+            f"{flav}decay per-species split: {bad} of {len(l4)} events did not "
+            "decompose; they keep 1.0 for every species",
+            stacklevel=2,
+        )
+    ones = np.ones(len(l4), dtype=np.float64)
+    for sp, _pid in _DECAY_SPECIES[flav]:
+        idx = [k for k, c in enumerate(cats) if c[0] == sp]
+        up = np.exp(n[:, idx] @ lu[idx])
+        dn = np.exp(n[:, idx] @ ld[idx])
+        up_moves, dn_moves = np.any(lu[idx] != 0), np.any(ld[idx] != 0)
+        if up_moves and not dn_moves:
+            dn = 1.0 / up
+        elif dn_moves and not up_moves:
+            up = 1.0 / dn
+        weights.add(f"{flav}decay_{sp}", ones, up, dn)
+
+
+def add_fragmentation_decay_weights(
+    weights, pruned_ev, isSyst=False, runs_sumw=None, genpart_fallback=False
+):
     LABELS = [
         "bfragBL",
         "bfragPeterson",
@@ -3714,6 +3955,17 @@ def add_fragmentation_decay_weights(weights, pruned_ev, isSyst=False):
         else:
             for lbl in LABELS:
                 weights.add(lbl, nom)
+
+    if (
+        "bFragAndDecayWeight" in pruned_ev.fields
+        and "cFragAndDecayWeight" in pruned_ev.fields
+    ):
+        return _add_fragdecay_from_branches(
+            weights, pruned_ev, isSyst, runs_sumw, LABELS, nom, _commit
+        )
+
+    if not genpart_fallback:
+        return _commit()
 
     if "GenPart" not in pruned_ev.fields:
         warnings.warn(
@@ -3833,17 +4085,16 @@ def add_fragmentation_decay_weights(weights, pruned_ev, isSyst=False):
             if pf == "b":
                 arrs["bfu"][ievt] = float(np.prod(maps["b_bl_up"](xv)))
                 arrs["bfd"][ievt] = float(np.prod(maps["b_bl_dn"](xv)))
-                w_pet = float(np.prod(maps["b_pet"](xv)))
-                arrs["bpu"][ievt] = w_pet
-                arrs["bpd"][ievt] = 1.0 / max(w_pet, 1e-6)
+                # Peterson down stays at the nominal (initialised to 1): one
+                # alternative model, mirrored at template level, as in the
+                # branch path
+                arrs["bpu"][ievt] = float(np.prod(maps["b_pet"](xv)))
                 arrs["bdu"][ievt] = float(np.prod(maps["bdec_up"](pids)))
                 arrs["bdd"][ievt] = float(np.prod(maps["bdec_dn"](pids)))
             else:
                 arrs["cfu"][ievt] = float(np.prod(maps["c_bl_up"](xv)))
                 arrs["cfd"][ievt] = float(np.prod(maps["c_bl_dn"](xv)))
-                w_pet = float(np.prod(maps["c_pet"](xv)))
-                arrs["cpu"][ievt] = w_pet
-                arrs["cpd"][ievt] = 1.0 / max(w_pet, 1e-6)
+                arrs["cpu"][ievt] = float(np.prod(maps["c_pet"](xv)))
                 arrs["cdu"][ievt] = float(np.prod(maps["cdec_up"](pids)))
                 arrs["cdd"][ievt] = float(np.prod(maps["cdec_dn"](pids)))
 
@@ -3862,27 +4113,127 @@ def add_fragmentation_decay_weights(weights, pruned_ev, isSyst=False):
     )
 
 
+_RUNS_SUMW_CACHE = {}
+
+# `Runs`-tree branches holding, per stored-weight index, sum(genWeight * w_i) already
+# divided by genEventSumw. So the per-file normalisation of variation i is 1 / Sumw[i].
+_RUNS_SUMW_BRANCHES = (
+    "PSSumw",
+    "BFragAndDecayWeightSumw",
+    "CFragAndDecayWeightSumw",
+    "TOPMLWeightSumw",
+    "TopPtWeightSumw",
+)
+
+
+def get_runs_sumw(filename):
+    """Per-file `Runs`-tree weight sums, cached by filename. `{}` when unavailable."""
+    if filename in _RUNS_SUMW_CACHE:
+        return _RUNS_SUMW_CACHE[filename]
+
+    sums = {}
+    if filename:
+        try:
+            with uproot.open(filename) as fh:
+                runs = fh["Runs"]
+                keys = set(runs.keys())
+                gsumw = np.asarray(
+                    runs["genEventSumw"].array(library="np"), dtype=np.float64
+                )
+                for br in _RUNS_SUMW_BRANCHES:
+                    if br not in keys:
+                        continue
+                    per_run = np.array(
+                        [
+                            np.asarray(v, dtype=np.float64)
+                            for v in runs[br].array().to_list()
+                        ]
+                    )
+                    # the stored sums are ratios to genEventSumw, so combining several
+                    # Runs entries has to put that denominator back first
+                    sums[br] = (per_run * gsumw[:, None]).sum(axis=0) / gsumw.sum()
+        except Exception as exc:
+            warnings.warn(
+                f"Could not read Runs-tree sums from {filename}: {exc}", stacklevel=2
+            )
+
+    _RUNS_SUMW_CACHE[filename] = sums
+    return sums
+
+
+def runs_sumw_norm(runs_sumw, branch, n_expected):
+    """Return the Sumw vector for `branch`, or None if it cannot be trusted."""
+    s = runs_sumw.get(branch)
+    if s is None:
+        return None
+    if len(s) != n_expected or not np.all(np.isfinite(s)) or np.any(s <= 0):
+        warnings.warn(
+            f"{branch} is not usable for normalisation (length {len(s)}, expected "
+            f"{n_expected}; min {np.min(s)}); leaving those weights un-normalised.",
+            stacklevel=2,
+        )
+        return None
+    return s
+
+
 # Jennet adds PS weights
 # https://github.com/andrzejnovak/boostedhiggs/blob/master/boostedhiggs/corrections.py#L88-L108
-def add_ps_weight(weights, ps_weights, isSyst=False):
+def add_ps_weight(weights, ps_weights, isSyst=False, runs_sumw=None):
     nom = np.ones(len(weights.weight()))
-    up_isr = np.ones(len(weights.weight()))
-    down_isr = np.ones(len(weights.weight()))
-    up_fsr = np.ones(len(weights.weight()))
-    down_fsr = np.ones(len(weights.weight()))
 
-    if ps_weights is not None and isSyst != False:
-        if len(ps_weights[0]) >= 4:
-            up_isr = ps_weights[:, 0]
-            down_isr = ps_weights[:, 2]
-            up_fsr = ps_weights[:, 1]
-            down_fsr = ps_weights[:, 3]
-            weights.add("UEPS_ISR", nom, up_isr, down_isr)
-            weights.add("UEPS_FSR", nom, up_fsr, down_fsr)
-        else:
-            warnings.warn(f"PS weight vector has length {len(ps_weights[0])}")
-            weights.add("UEPS_ISR", nom, nom, nom)
-            weights.add("UEPS_FSR", nom, nom, nom)
+    if ps_weights is None or isSyst == False:
+        return
+
+    n = len(ps_weights[0])
+    if n == 4:
+        up_isr = ps_weights[:, 0]
+        down_isr = ps_weights[:, 2]
+        up_fsr = ps_weights[:, 1]
+        down_fsr = ps_weights[:, 3]
+        weights.add("UEPS_ISR", nom, up_isr, down_isr)
+        weights.add("UEPS_FSR", nom, up_fsr, down_fsr)
+    elif n == 44:
+        # 22 up/down pairs: mu_R x0.707/1.414, x0.5/2, x0.25/4, plus per-kernel
+        # g2gg/g2qq/q2qg/x2xg mu_R and cns, separately for ISR and FSR.
+        # FSR indices given; ISR = FSR + 22. "Up" is the larger murfac / cns=+2.0.
+        pairs = [
+            (None, 3, 2),
+            ("muR_sqrt2", 1, 0),
+            ("muR_4", 5, 4),
+            ("g2gg_muR", 7, 6),
+            ("g2qq_muR", 9, 8),
+            ("q2qg_muR", 11, 10),
+            ("x2xg_muR", 13, 12),
+            ("g2gg_cns", 15, 14),
+            ("g2qq_cns", 17, 16),
+            ("q2qg_cns", 19, 18),
+            ("x2xg_cns", 21, 20),
+        ]
+        norm = runs_sumw_norm(runs_sumw or {}, "PSSumw", 44)
+        for suffix, fsr_up, fsr_down in pairs:
+            isr_up, isr_down = fsr_up + 22, fsr_down + 22
+            if suffix is None:
+                fsr_name, isr_name = "UEPS_FSR", "UEPS_ISR"
+            else:
+                fsr_name, isr_name = f"PS_FSR_{suffix}", f"PS_ISR_{suffix}"
+            for name, i_up, i_down in (
+                (fsr_name, fsr_up, fsr_down),
+                (isr_name, isr_up, isr_down),
+            ):
+                # The per-file Runs sums keep each factor near 1; the exact
+                # acceptance-only normalisation is done downstream for EVERY
+                # generator-level variation (reweighting -> scaleSumW), where
+                # dividing by the same file constant again cancels.
+                if norm is None:
+                    up, down = ps_weights[:, i_up], ps_weights[:, i_down]
+                else:
+                    up = ps_weights[:, i_up] / norm[i_up]
+                    down = ps_weights[:, i_down] / norm[i_down]
+                weights.add(name, nom, up, down)
+    else:
+        warnings.warn(f"PS weight vector has length {n}")
+        weights.add("UEPS_ISR", nom, nom, nom)
+        weights.add("UEPS_FSR", nom, nom, nom)
 
 
 def add_scalevar_weight(weights, lhe_weights, isSyst=False):
