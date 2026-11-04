@@ -40,6 +40,9 @@ from BTVNanoCommissioning.workflows._2D_ttsemilep_valid_sf import (
 from BTVNanoCommissioning.workflows._2D_Wc_valid_sf import (
     NanoProcessor as _2DWcValidSFProcessor,
 )
+from BTVNanoCommissioning.workflows._2D_dijet_valid_sf import (
+    NanoProcessor as _2DDijetValidSFProcessor,
+)
 
 # QCD
 from BTVNanoCommissioning.workflows.QCD_validation import (
@@ -134,6 +137,16 @@ workflows["ctag_Wc_WP_sf"] = partial(
 )
 workflows["ectag_Wc_WP_sf"] = partial(
     CTAGWcTTValidSFProcessor, selectionModifier="cutbased_WcE"
+)
+
+# Dijet tag-and-probe (2D). The two variants share the same data and overlap in
+# pT -- they are alternative triggerings of the same events, not independent
+# channels, so do not put both into one fit.
+workflows["2D_dijet_sf"] = partial(
+    _2DDijetValidSFProcessor, selectionModifier="DiPFJetAve"
+)
+workflows["2D_dijet_lowpt_sf"] = partial(
+    _2DDijetValidSFProcessor, selectionModifier="PFJet"
 )
 
 # DY

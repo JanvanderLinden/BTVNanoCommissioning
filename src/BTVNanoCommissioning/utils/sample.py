@@ -32,6 +32,46 @@ predefined_sample = {
             "QCD_*PT-3000_TuneCP5_13p6TeV_pythia8",
         ],
     },
+    # Dijet tag-and-probe for the 2D SF fit. HT-binned madgraphMLM QCD rather
+    # than the pT-binned pythia8 set: only the madgraph samples carry LHE
+    # weights (103 PDF, 9 scale), so they are the only ones that can supply
+    # gen-level PDF/aS/scale uncertainties for this region.
+    #
+    # "2D_dijet_sf" is the balanced DiPFJetAve variant, "2D_dijet_lowpt_sf" the
+    # single-jet PFJet one that reaches probe pT down to 20 GeV. Same datasets:
+    # they are alternative triggerings of the same events.
+    "2D_dijet_sf": {
+        "data": ["JetMET0", "JetMET1"],
+        "MC": [
+            "QCD-4Jets_*HT-40to70_TuneCP5_13p6TeV_madgraphMLM-pythia8",
+            "QCD-4Jets_*HT-70to100_TuneCP5_13p6TeV_madgraphMLM-pythia8",
+            "QCD-4Jets_*HT-100to200_TuneCP5_13p6TeV_madgraphMLM-pythia8",
+            "QCD-4Jets_*HT-200to400_TuneCP5_13p6TeV_madgraphMLM-pythia8",
+            "QCD-4Jets_*HT-400to600_TuneCP5_13p6TeV_madgraphMLM-pythia8",
+            "QCD-4Jets_*HT-600to800_TuneCP5_13p6TeV_madgraphMLM-pythia8",
+            "QCD-4Jets_*HT-800to1000_TuneCP5_13p6TeV_madgraphMLM-pythia8",
+            "QCD-4Jets_*HT-1000to1200_TuneCP5_13p6TeV_madgraphMLM-pythia8",
+            "QCD-4Jets_*HT-1200to1500_TuneCP5_13p6TeV_madgraphMLM-pythia8",
+            "QCD-4Jets_*HT-1500to2000_TuneCP5_13p6TeV_madgraphMLM-pythia8",
+            "QCD-4Jets_*HT-2000_TuneCP5_13p6TeV_madgraphMLM-pythia8",
+        ],
+    },
+    "2D_dijet_lowpt_sf": {
+        "data": ["JetMET0", "JetMET1"],
+        "MC": [
+            "QCD-4Jets_*HT-40to70_TuneCP5_13p6TeV_madgraphMLM-pythia8",
+            "QCD-4Jets_*HT-70to100_TuneCP5_13p6TeV_madgraphMLM-pythia8",
+            "QCD-4Jets_*HT-100to200_TuneCP5_13p6TeV_madgraphMLM-pythia8",
+            "QCD-4Jets_*HT-200to400_TuneCP5_13p6TeV_madgraphMLM-pythia8",
+            "QCD-4Jets_*HT-400to600_TuneCP5_13p6TeV_madgraphMLM-pythia8",
+            "QCD-4Jets_*HT-600to800_TuneCP5_13p6TeV_madgraphMLM-pythia8",
+            "QCD-4Jets_*HT-800to1000_TuneCP5_13p6TeV_madgraphMLM-pythia8",
+            "QCD-4Jets_*HT-1000to1200_TuneCP5_13p6TeV_madgraphMLM-pythia8",
+            "QCD-4Jets_*HT-1200to1500_TuneCP5_13p6TeV_madgraphMLM-pythia8",
+            "QCD-4Jets_*HT-1500to2000_TuneCP5_13p6TeV_madgraphMLM-pythia8",
+            "QCD-4Jets_*HT-2000_TuneCP5_13p6TeV_madgraphMLM-pythia8",
+        ],
+    },
     "QCD_smu_sf": {
         "data": ["BTagMu"],
         "MC": [

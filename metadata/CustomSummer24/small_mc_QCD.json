@@ -1,0 +1,86 @@
+{
+  "QCD_Bin-PT-2000to2500_TuneCP5_13p6TeV_pythia8": [
+    "root://storage01.lcg.cscs.ch:1096//pnfs/lcg.cscs.ch/cms/trivcat/store/group/cmst3/group/hplushf/NanoTuples/2024/mc/QCD_Bin-PT-2000to2500_TuneCP5_13p6TeV_pythia8/NanoTuples-uParTv3-parTlepID-NanoAODv15_RunIII2024Summer24MiniAODv6-150X_v2-v2/260701_094029/0000/nano_217.root",
+    "root://storage01.lcg.cscs.ch:1096//pnfs/lcg.cscs.ch/cms/trivcat/store/group/cmst3/group/hplushf/NanoTuples/2024/mc/QCD_Bin-PT-2000to2500_TuneCP5_13p6TeV_pythia8/NanoTuples-uParTv3-parTlepID-NanoAODv15_RunIII2024Summer24MiniAODv6-150X_v2-v2/260701_094029/0000/nano_43.root",
+    "root://storage01.lcg.cscs.ch:1096//pnfs/lcg.cscs.ch/cms/trivcat/store/group/cmst3/group/hplushf/NanoTuples/2024/mc/QCD_Bin-PT-2000to2500_TuneCP5_13p6TeV_pythia8/NanoTuples-uParTv3-parTlepID-NanoAODv15_RunIII2024Summer24MiniAODv6-150X_v2-v2/260701_094029/0000/nano_14.root",
+    "root://storage01.lcg.cscs.ch:1096//pnfs/lcg.cscs.ch/cms/trivcat/store/group/cmst3/group/hplushf/NanoTuples/2024/mc/QCD_Bin-PT-2000to2500_TuneCP5_13p6TeV_pythia8/NanoTuples-uParTv3-parTlepID-NanoAODv15_RunIII2024Summer24MiniAODv6-150X_v2-v2/260701_094029/0000/nano_303.root"
+  ],
+  "QCD_Bin-PT-120to170_TuneCP5_13p6TeV_pythia8": [
+    "root://storage01.lcg.cscs.ch:1096//pnfs/lcg.cscs.ch/cms/trivcat/store/group/cmst3/group/hplushf/NanoTuples/2024/mc/QCD_Bin-PT-120to170_TuneCP5_13p6TeV_pythia8/NanoTuples-uParTv3-parTlepID-NanoAODv15_RunIII2024Summer24MiniAODv6-150X_v2-v2/260526_132242/0000/nano_146.root",
+    "root://storage01.lcg.cscs.ch:1096//pnfs/lcg.cscs.ch/cms/trivcat/store/group/cmst3/group/hplushf/NanoTuples/2024/mc/QCD_Bin-PT-120to170_TuneCP5_13p6TeV_pythia8/NanoTuples-uParTv3-parTlepID-NanoAODv15_RunIII2024Summer24MiniAODv6-150X_v2-v2/260526_132242/0000/nano_246.root",
+    "root://storage01.lcg.cscs.ch:1096//pnfs/lcg.cscs.ch/cms/trivcat/store/group/cmst3/group/hplushf/NanoTuples/2024/mc/QCD_Bin-PT-120to170_TuneCP5_13p6TeV_pythia8/NanoTuples-uParTv3-parTlepID-NanoAODv15_RunIII2024Summer24MiniAODv6-150X_v2-v2/260526_132242/0000/nano_58.root",
+    "root://storage01.lcg.cscs.ch:1096//pnfs/lcg.cscs.ch/cms/trivcat/store/group/cmst3/group/hplushf/NanoTuples/2024/mc/QCD_Bin-PT-120to170_TuneCP5_13p6TeV_pythia8/NanoTuples-uParTv3-parTlepID-NanoAODv15_RunIII2024Summer24MiniAODv6-150X_v2-v2/260526_132242/0000/nano_988.root"
+  ],
+  "QCD_Bin-PT-1500to2000_TuneCP5_13p6TeV_pythia8": [
+    "root://storage01.lcg.cscs.ch:1096//pnfs/lcg.cscs.ch/cms/trivcat/store/group/cmst3/group/hplushf/NanoTuples/2024/mc/QCD_Bin-PT-1500to2000_TuneCP5_13p6TeV_pythia8/NanoTuples-uParTv3-parTlepID-NanoAODv15_RunIII2024Summer24MiniAODv6-150X_v2-v2/260526_132631/0000/nano_389.root",
+    "root://storage01.lcg.cscs.ch:1096//pnfs/lcg.cscs.ch/cms/trivcat/store/group/cmst3/group/hplushf/NanoTuples/2024/mc/QCD_Bin-PT-1500to2000_TuneCP5_13p6TeV_pythia8/NanoTuples-uParTv3-parTlepID-NanoAODv15_RunIII2024Summer24MiniAODv6-150X_v2-v2/260526_132631/0000/nano_83.root",
+    "root://storage01.lcg.cscs.ch:1096//pnfs/lcg.cscs.ch/cms/trivcat/store/group/cmst3/group/hplushf/NanoTuples/2024/mc/QCD_Bin-PT-1500to2000_TuneCP5_13p6TeV_pythia8/NanoTuples-uParTv3-parTlepID-NanoAODv15_RunIII2024Summer24MiniAODv6-150X_v2-v2/260526_132631/0000/nano_396.root",
+    "root://storage01.lcg.cscs.ch:1096//pnfs/lcg.cscs.ch/cms/trivcat/store/group/cmst3/group/hplushf/NanoTuples/2024/mc/QCD_Bin-PT-1500to2000_TuneCP5_13p6TeV_pythia8/NanoTuples-uParTv3-parTlepID-NanoAODv15_RunIII2024Summer24MiniAODv6-150X_v2-v2/260526_132631/0000/nano_408.root"
+  ],
+  "QCD_Bin-PT-2500to3000_TuneCP5_13p6TeV_pythia8": [
+    "root://storage01.lcg.cscs.ch:1096//pnfs/lcg.cscs.ch/cms/trivcat/store/group/cmst3/group/hplushf/NanoTuples/2024/mc/QCD_Bin-PT-2500to3000_TuneCP5_13p6TeV_pythia8/NanoTuples-uParTv3-parTlepID-NanoAODv15_RunIII2024Summer24MiniAODv6-150X_v2-v2/260526_132734/0000/nano_205.root",
+    "root://storage01.lcg.cscs.ch:1096//pnfs/lcg.cscs.ch/cms/trivcat/store/group/cmst3/group/hplushf/NanoTuples/2024/mc/QCD_Bin-PT-2500to3000_TuneCP5_13p6TeV_pythia8/NanoTuples-uParTv3-parTlepID-NanoAODv15_RunIII2024Summer24MiniAODv6-150X_v2-v2/260526_132734/0000/nano_95.root",
+    "root://storage01.lcg.cscs.ch:1096//pnfs/lcg.cscs.ch/cms/trivcat/store/group/cmst3/group/hplushf/NanoTuples/2024/mc/QCD_Bin-PT-2500to3000_TuneCP5_13p6TeV_pythia8/NanoTuples-uParTv3-parTlepID-NanoAODv15_RunIII2024Summer24MiniAODv6-150X_v2-v2/260526_132734/0000/nano_263.root",
+    "root://storage01.lcg.cscs.ch:1096//pnfs/lcg.cscs.ch/cms/trivcat/store/group/cmst3/group/hplushf/NanoTuples/2024/mc/QCD_Bin-PT-2500to3000_TuneCP5_13p6TeV_pythia8/NanoTuples-uParTv3-parTlepID-NanoAODv15_RunIII2024Summer24MiniAODv6-150X_v2-v2/260526_132734/0000/nano_67.root"
+  ],
+  "QCD_Bin-PT-3000_TuneCP5_13p6TeV_pythia8": [
+    "root://storage01.lcg.cscs.ch:1096//pnfs/lcg.cscs.ch/cms/trivcat/store/group/cmst3/group/hplushf/NanoTuples/2024/mc/QCD_Bin-PT-3000_TuneCP5_13p6TeV_pythia8/NanoTuples-uParTv3-parTlepID-NanoAODv15_RunIII2024Summer24MiniAODv6-150X_v2-v2/260526_132806/0000/nano_500.root",
+    "root://storage01.lcg.cscs.ch:1096//pnfs/lcg.cscs.ch/cms/trivcat/store/group/cmst3/group/hplushf/NanoTuples/2024/mc/QCD_Bin-PT-3000_TuneCP5_13p6TeV_pythia8/NanoTuples-uParTv3-parTlepID-NanoAODv15_RunIII2024Summer24MiniAODv6-150X_v2-v2/260526_132806/0000/nano_323.root",
+    "root://storage01.lcg.cscs.ch:1096//pnfs/lcg.cscs.ch/cms/trivcat/store/group/cmst3/group/hplushf/NanoTuples/2024/mc/QCD_Bin-PT-3000_TuneCP5_13p6TeV_pythia8/NanoTuples-uParTv3-parTlepID-NanoAODv15_RunIII2024Summer24MiniAODv6-150X_v2-v2/260526_132806/0000/nano_281.root",
+    "root://storage01.lcg.cscs.ch:1096//pnfs/lcg.cscs.ch/cms/trivcat/store/group/cmst3/group/hplushf/NanoTuples/2024/mc/QCD_Bin-PT-3000_TuneCP5_13p6TeV_pythia8/NanoTuples-uParTv3-parTlepID-NanoAODv15_RunIII2024Summer24MiniAODv6-150X_v2-v2/260526_132806/0000/nano_161.root"
+  ],
+  "QCD_Bin-PT-50to80_TuneCP5_13p6TeV_pythia8": [
+    "root://storage01.lcg.cscs.ch:1096//pnfs/lcg.cscs.ch/cms/trivcat/store/group/cmst3/group/hplushf/NanoTuples/2024/mc/QCD_Bin-PT-50to80_TuneCP5_13p6TeV_pythia8/NanoTuples-uParTv3-parTlepID-NanoAODv15_RunIII2024Summer24MiniAODv6-150X_v2-v2/260526_132138/0000/nano_407.root",
+    "root://storage01.lcg.cscs.ch:1096//pnfs/lcg.cscs.ch/cms/trivcat/store/group/cmst3/group/hplushf/NanoTuples/2024/mc/QCD_Bin-PT-50to80_TuneCP5_13p6TeV_pythia8/NanoTuples-uParTv3-parTlepID-NanoAODv15_RunIII2024Summer24MiniAODv6-150X_v2-v2/260526_132138/0000/nano_140.root",
+    "root://storage01.lcg.cscs.ch:1096//pnfs/lcg.cscs.ch/cms/trivcat/store/group/cmst3/group/hplushf/NanoTuples/2024/mc/QCD_Bin-PT-50to80_TuneCP5_13p6TeV_pythia8/NanoTuples-uParTv3-parTlepID-NanoAODv15_RunIII2024Summer24MiniAODv6-150X_v2-v2/260526_132138/0000/nano_313.root",
+    "root://storage01.lcg.cscs.ch:1096//pnfs/lcg.cscs.ch/cms/trivcat/store/group/cmst3/group/hplushf/NanoTuples/2024/mc/QCD_Bin-PT-50to80_TuneCP5_13p6TeV_pythia8/NanoTuples-uParTv3-parTlepID-NanoAODv15_RunIII2024Summer24MiniAODv6-150X_v2-v2/260526_132138/0000/nano_301.root"
+  ],
+  "QCD_Bin-PT-30to50_TuneCP5_13p6TeV_pythia8": [
+    "root://storage01.lcg.cscs.ch:1096//pnfs/lcg.cscs.ch/cms/trivcat/store/group/cmst3/group/hplushf/NanoTuples/2024/mc/QCD_Bin-PT-30to50_TuneCP5_13p6TeV_pythia8/NanoTuples-uParTv3-parTlepID-NanoAODv15_RunIII2024Summer24MiniAODv6-150X_v2-v2/260526_132106/0000/nano_991.root",
+    "root://storage01.lcg.cscs.ch:1096//pnfs/lcg.cscs.ch/cms/trivcat/store/group/cmst3/group/hplushf/NanoTuples/2024/mc/QCD_Bin-PT-30to50_TuneCP5_13p6TeV_pythia8/NanoTuples-uParTv3-parTlepID-NanoAODv15_RunIII2024Summer24MiniAODv6-150X_v2-v2/260526_132106/0000/nano_269.root",
+    "root://storage01.lcg.cscs.ch:1096//pnfs/lcg.cscs.ch/cms/trivcat/store/group/cmst3/group/hplushf/NanoTuples/2024/mc/QCD_Bin-PT-30to50_TuneCP5_13p6TeV_pythia8/NanoTuples-uParTv3-parTlepID-NanoAODv15_RunIII2024Summer24MiniAODv6-150X_v2-v2/260526_132106/0000/nano_55.root",
+    "root://storage01.lcg.cscs.ch:1096//pnfs/lcg.cscs.ch/cms/trivcat/store/group/cmst3/group/hplushf/NanoTuples/2024/mc/QCD_Bin-PT-30to50_TuneCP5_13p6TeV_pythia8/NanoTuples-uParTv3-parTlepID-NanoAODv15_RunIII2024Summer24MiniAODv6-150X_v2-v2/260526_132106/0000/nano_780.root"
+  ],
+  "QCD_Bin-PT-80to120_TuneCP5_13p6TeV_pythia8": [
+    "root://storage01.lcg.cscs.ch:1096//pnfs/lcg.cscs.ch/cms/trivcat/store/group/cmst3/group/hplushf/NanoTuples/2024/mc/QCD_Bin-PT-80to120_TuneCP5_13p6TeV_pythia8/NanoTuples-uParTv3-parTlepID-NanoAODv15_RunIII2024Summer24MiniAODv6-150X_v2-v2/260526_132209/0000/nano_929.root",
+    "root://storage01.lcg.cscs.ch:1096//pnfs/lcg.cscs.ch/cms/trivcat/store/group/cmst3/group/hplushf/NanoTuples/2024/mc/QCD_Bin-PT-80to120_TuneCP5_13p6TeV_pythia8/NanoTuples-uParTv3-parTlepID-NanoAODv15_RunIII2024Summer24MiniAODv6-150X_v2-v2/260526_132209/0001/nano_1228.root",
+    "root://storage01.lcg.cscs.ch:1096//pnfs/lcg.cscs.ch/cms/trivcat/store/group/cmst3/group/hplushf/NanoTuples/2024/mc/QCD_Bin-PT-80to120_TuneCP5_13p6TeV_pythia8/NanoTuples-uParTv3-parTlepID-NanoAODv15_RunIII2024Summer24MiniAODv6-150X_v2-v2/260526_132209/0000/nano_180.root",
+    "root://storage01.lcg.cscs.ch:1096//pnfs/lcg.cscs.ch/cms/trivcat/store/group/cmst3/group/hplushf/NanoTuples/2024/mc/QCD_Bin-PT-80to120_TuneCP5_13p6TeV_pythia8/NanoTuples-uParTv3-parTlepID-NanoAODv15_RunIII2024Summer24MiniAODv6-150X_v2-v2/260526_132209/0000/nano_965.root"
+  ],
+  "QCD_Bin-PT-300to470_TuneCP5_13p6TeV_pythia8": [
+    "root://storage01.lcg.cscs.ch:1096//pnfs/lcg.cscs.ch/cms/trivcat/store/group/cmst3/group/hplushf/NanoTuples/2024/mc/QCD_Bin-PT-300to470_TuneCP5_13p6TeV_pythia8/NanoTuples-uParTv3-parTlepID-NanoAODv15_RunIII2024Summer24MiniAODv6-150X_v2-v2/260526_132350/0000/nano_591.root",
+    "root://storage01.lcg.cscs.ch:1096//pnfs/lcg.cscs.ch/cms/trivcat/store/group/cmst3/group/hplushf/NanoTuples/2024/mc/QCD_Bin-PT-300to470_TuneCP5_13p6TeV_pythia8/NanoTuples-uParTv3-parTlepID-NanoAODv15_RunIII2024Summer24MiniAODv6-150X_v2-v2/260526_132350/0000/nano_863.root",
+    "root://storage01.lcg.cscs.ch:1096//pnfs/lcg.cscs.ch/cms/trivcat/store/group/cmst3/group/hplushf/NanoTuples/2024/mc/QCD_Bin-PT-300to470_TuneCP5_13p6TeV_pythia8/NanoTuples-uParTv3-parTlepID-NanoAODv15_RunIII2024Summer24MiniAODv6-150X_v2-v2/260526_132350/0001/nano_1153.root",
+    "root://storage01.lcg.cscs.ch:1096//pnfs/lcg.cscs.ch/cms/trivcat/store/group/cmst3/group/hplushf/NanoTuples/2024/mc/QCD_Bin-PT-300to470_TuneCP5_13p6TeV_pythia8/NanoTuples-uParTv3-parTlepID-NanoAODv15_RunIII2024Summer24MiniAODv6-150X_v2-v2/260526_132350/0001/nano_1273.root"
+  ],
+  "QCD_Bin-PT-470to600_TuneCP5_13p6TeV_pythia8": [
+    "root://storage01.lcg.cscs.ch:1096//pnfs/lcg.cscs.ch/cms/trivcat/store/group/cmst3/group/hplushf/NanoTuples/2024/mc/QCD_Bin-PT-470to600_TuneCP5_13p6TeV_pythia8/NanoTuples-uParTv3-parTlepID-NanoAODv15_RunIII2024Summer24MiniAODv6-150X_v2-v2/260526_132424/0000/nano_442.root",
+    "root://storage01.lcg.cscs.ch:1096//pnfs/lcg.cscs.ch/cms/trivcat/store/group/cmst3/group/hplushf/NanoTuples/2024/mc/QCD_Bin-PT-470to600_TuneCP5_13p6TeV_pythia8/NanoTuples-uParTv3-parTlepID-NanoAODv15_RunIII2024Summer24MiniAODv6-150X_v2-v2/260526_132424/0000/nano_916.root",
+    "root://storage01.lcg.cscs.ch:1096//pnfs/lcg.cscs.ch/cms/trivcat/store/group/cmst3/group/hplushf/NanoTuples/2024/mc/QCD_Bin-PT-470to600_TuneCP5_13p6TeV_pythia8/NanoTuples-uParTv3-parTlepID-NanoAODv15_RunIII2024Summer24MiniAODv6-150X_v2-v2/260526_132424/0001/nano_1123.root",
+    "root://storage01.lcg.cscs.ch:1096//pnfs/lcg.cscs.ch/cms/trivcat/store/group/cmst3/group/hplushf/NanoTuples/2024/mc/QCD_Bin-PT-470to600_TuneCP5_13p6TeV_pythia8/NanoTuples-uParTv3-parTlepID-NanoAODv15_RunIII2024Summer24MiniAODv6-150X_v2-v2/260526_132424/0001/nano_1126.root"
+  ],
+  "QCD_Bin-PT-1000to1500_TuneCP5_13p6TeV_pythia8": [
+    "root://storage01.lcg.cscs.ch:1096//pnfs/lcg.cscs.ch/cms/trivcat/store/group/cmst3/group/hplushf/NanoTuples/2024/mc/QCD_Bin-PT-1000to1500_TuneCP5_13p6TeV_pythia8/NanoTuples-uParTv3-parTlepID-NanoAODv15_RunIII2024Summer24MiniAODv6-150X_v2-v2/260526_132559/0001/nano_1563.root",
+    "root://storage01.lcg.cscs.ch:1096//pnfs/lcg.cscs.ch/cms/trivcat/store/group/cmst3/group/hplushf/NanoTuples/2024/mc/QCD_Bin-PT-1000to1500_TuneCP5_13p6TeV_pythia8/NanoTuples-uParTv3-parTlepID-NanoAODv15_RunIII2024Summer24MiniAODv6-150X_v2-v2/260526_132559/0001/nano_1560.root",
+    "root://storage01.lcg.cscs.ch:1096//pnfs/lcg.cscs.ch/cms/trivcat/store/group/cmst3/group/hplushf/NanoTuples/2024/mc/QCD_Bin-PT-1000to1500_TuneCP5_13p6TeV_pythia8/NanoTuples-uParTv3-parTlepID-NanoAODv15_RunIII2024Summer24MiniAODv6-150X_v2-v2/260526_132559/0000/nano_143.root",
+    "root://storage01.lcg.cscs.ch:1096//pnfs/lcg.cscs.ch/cms/trivcat/store/group/cmst3/group/hplushf/NanoTuples/2024/mc/QCD_Bin-PT-1000to1500_TuneCP5_13p6TeV_pythia8/NanoTuples-uParTv3-parTlepID-NanoAODv15_RunIII2024Summer24MiniAODv6-150X_v2-v2/260526_132559/0000/nano_935.root"
+  ],
+  "QCD_Bin-PT-600to800_TuneCP5_13p6TeV_pythia8": [
+    "root://storage01.lcg.cscs.ch:1096//pnfs/lcg.cscs.ch/cms/trivcat/store/group/cmst3/group/hplushf/NanoTuples/2024/mc/QCD_Bin-PT-600to800_TuneCP5_13p6TeV_pythia8/NanoTuples-uParTv3-parTlepID-NanoAODv15_RunIII2024Summer24MiniAODv6-150X_v2-v2/260526_132456/0000/nano_178.root",
+    "root://storage01.lcg.cscs.ch:1096//pnfs/lcg.cscs.ch/cms/trivcat/store/group/cmst3/group/hplushf/NanoTuples/2024/mc/QCD_Bin-PT-600to800_TuneCP5_13p6TeV_pythia8/NanoTuples-uParTv3-parTlepID-NanoAODv15_RunIII2024Summer24MiniAODv6-150X_v2-v2/260526_132456/0001/nano_1211.root",
+    "root://storage01.lcg.cscs.ch:1096//pnfs/lcg.cscs.ch/cms/trivcat/store/group/cmst3/group/hplushf/NanoTuples/2024/mc/QCD_Bin-PT-600to800_TuneCP5_13p6TeV_pythia8/NanoTuples-uParTv3-parTlepID-NanoAODv15_RunIII2024Summer24MiniAODv6-150X_v2-v2/260526_132456/0001/nano_1016.root",
+    "root://storage01.lcg.cscs.ch:1096//pnfs/lcg.cscs.ch/cms/trivcat/store/group/cmst3/group/hplushf/NanoTuples/2024/mc/QCD_Bin-PT-600to800_TuneCP5_13p6TeV_pythia8/NanoTuples-uParTv3-parTlepID-NanoAODv15_RunIII2024Summer24MiniAODv6-150X_v2-v2/260526_132456/0001/nano_1422.root"
+  ],
+  "QCD_Bin-PT-170to300_TuneCP5_13p6TeV_pythia8": [
+    "root://storage01.lcg.cscs.ch:1096//pnfs/lcg.cscs.ch/cms/trivcat/store/group/cmst3/group/hplushf/NanoTuples/2024/mc/QCD_Bin-PT-170to300_TuneCP5_13p6TeV_pythia8/NanoTuples-uParTv3-parTlepID-NanoAODv15_RunIII2024Summer24MiniAODv6-150X_v2-v2/260526_132312/0001/nano_1012.root",
+    "root://storage01.lcg.cscs.ch:1096//pnfs/lcg.cscs.ch/cms/trivcat/store/group/cmst3/group/hplushf/NanoTuples/2024/mc/QCD_Bin-PT-170to300_TuneCP5_13p6TeV_pythia8/NanoTuples-uParTv3-parTlepID-NanoAODv15_RunIII2024Summer24MiniAODv6-150X_v2-v2/260526_132312/0000/nano_26.root",
+    "root://storage01.lcg.cscs.ch:1096//pnfs/lcg.cscs.ch/cms/trivcat/store/group/cmst3/group/hplushf/NanoTuples/2024/mc/QCD_Bin-PT-170to300_TuneCP5_13p6TeV_pythia8/NanoTuples-uParTv3-parTlepID-NanoAODv15_RunIII2024Summer24MiniAODv6-150X_v2-v2/260526_132312/0001/nano_1294.root",
+    "root://storage01.lcg.cscs.ch:1096//pnfs/lcg.cscs.ch/cms/trivcat/store/group/cmst3/group/hplushf/NanoTuples/2024/mc/QCD_Bin-PT-170to300_TuneCP5_13p6TeV_pythia8/NanoTuples-uParTv3-parTlepID-NanoAODv15_RunIII2024Summer24MiniAODv6-150X_v2-v2/260526_132312/0000/nano_18.root"
+  ],
+  "QCD_Bin-PT-800to1000_TuneCP5_13p6TeV_pythia8": [
+    "root://storage01.lcg.cscs.ch:1096//pnfs/lcg.cscs.ch/cms/trivcat/store/group/cmst3/group/hplushf/NanoTuples/2024/mc/QCD_Bin-PT-800to1000_TuneCP5_13p6TeV_pythia8/NanoTuples-uParTv3-parTlepID-NanoAODv15_RunIII2024Summer24MiniAODv6-150X_v2-v2/260701_093921/0001/nano_1314.root",
+    "root://storage01.lcg.cscs.ch:1096//pnfs/lcg.cscs.ch/cms/trivcat/store/group/cmst3/group/hplushf/NanoTuples/2024/mc/QCD_Bin-PT-800to1000_TuneCP5_13p6TeV_pythia8/NanoTuples-uParTv3-parTlepID-NanoAODv15_RunIII2024Summer24MiniAODv6-150X_v2-v2/260701_093921/0001/nano_1365.root",
+    "root://storage01.lcg.cscs.ch:1096//pnfs/lcg.cscs.ch/cms/trivcat/store/group/cmst3/group/hplushf/NanoTuples/2024/mc/QCD_Bin-PT-800to1000_TuneCP5_13p6TeV_pythia8/NanoTuples-uParTv3-parTlepID-NanoAODv15_RunIII2024Summer24MiniAODv6-150X_v2-v2/260701_093921/0000/nano_819.root",
+    "root://storage01.lcg.cscs.ch:1096//pnfs/lcg.cscs.ch/cms/trivcat/store/group/cmst3/group/hplushf/NanoTuples/2024/mc/QCD_Bin-PT-800to1000_TuneCP5_13p6TeV_pythia8/NanoTuples-uParTv3-parTlepID-NanoAODv15_RunIII2024Summer24MiniAODv6-150X_v2-v2/260701_093921/0000/nano_174.root"
+  ]
+}

@@ -4,6 +4,7 @@ from .axes.qgtag import axes as qgtag_axes
 from .histograms.common import get_histograms as common_hists
 from .histograms.ctag_ttdilep import get_histograms as ctag_ttdilep_hists
 from .histograms.ctag_ttsemilep import get_histograms as ctag_ttsemilep_hists
+from .histograms.dijet_2D import get_histograms as dijet_2D_hists
 from .histograms.dy_2D import get_histograms as dy_2D_hists
 from .histograms.dy import get_histograms as dy_hists
 from .histograms.dy_sfl import get_histograms as dy_sfl_hists
@@ -54,6 +55,7 @@ def get_hist_collections(axes: dict, hist_collections: list, **kwargs):
         "QCD_smu": qcd_smu_hists,
         "ctag_ttdilep": ctag_ttdilep_hists,
         "ctag_ttsemilep": ctag_ttsemilep_hists,
+        "dijet_2D": dijet_2D_hists,
         "DY_2D": dy_2D_hists,
         "DY": dy_hists,
         "DY_sfl": dy_sfl_hists,
