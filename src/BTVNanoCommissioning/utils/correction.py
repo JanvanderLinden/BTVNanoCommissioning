@@ -2009,9 +2009,11 @@ def EGM_shifts(shifts, correct_map, events, isRealData, systematic=False):
             "smear", ele_pt, ele_r9, np.abs(ele_etaSC)
         )
         smear = ak.unflatten(smear, n_ele)
-        # since the smearing is stochastic, a random number is needed for each event
+        # one independent random number per electron (per event would correlate the legs)
         rng = np.random.default_rng(seed=125)
-        random_numbers = rng.normal(loc=0.0, scale=1.0, size=len(ele.pt))
+        random_numbers = ak.unflatten(
+            rng.normal(loc=0.0, scale=1.0, size=len(ele_pt)), n_ele
+        )
         ele_pt_corr = ele.pt * (1 + smear * random_numbers)
 
     # scale and smearing uncertainties should be evaluated on the original MC only
