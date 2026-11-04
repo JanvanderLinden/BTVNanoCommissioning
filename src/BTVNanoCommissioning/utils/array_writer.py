@@ -329,15 +329,19 @@ def array_writer(
             events_out = uproot_writeable(pruned_event, include=out_branch)
             if perJet:
                 events_out = _flatten_to_perjet(events_out, perJet_collection)
-            fout["Events"] = events_out
-        fout["TotalEventCount"] = ak.Array(
+            _write_tree(fout, "Events", events_out)
+        _write_tree(
+            fout,
+            "TotalEventCount",
             {
                 "TotalEventCount": [
                     nano_event.metadata["entrystop"] - nano_event.metadata["entrystart"]
                 ]
-            }
+            },
         )
         if not isRealData:
-            fout["TotalEventWeight"] = ak.Array(
-                {"TotalEventWeight": [ak.sum(nano_event.genWeight)]}
+            _write_tree(
+                fout,
+                "TotalEventWeight",
+                {"TotalEventWeight": [ak.sum(nano_event.genWeight)]},
             )
