@@ -216,7 +216,7 @@ python runner.py --wf {wf} --json metadata/{args.campaign}/{types}_{args.campaig
 |---|---|
 | `runner.py --array-systs {none,weights,shifts,both}` | systematic content of the `--isArray` trees (V5: `weights`) |
 | `runner.py --vjets-stitch <json>` | LHE stitching of the FxFx W/DY samples; json in `src/BTVNanoCommissioning/data/STITCH/` (V5: `vjets_stitch_2024_processor.json`, made with `SFbc-2D/scripts/prod/stitchVjetsDerive.py`) |
-| `runner.py --nlo-reweight` | ML (PRISM) NLO reweighting of the FxFx W/DY samples (CMS AN-2026/042); needs `data/NLORW/` (ONNX model and `negativeReweight` extension); tree branch `nloWeight`, variation `nlo_ml_onoff` |
+| `runner.py --nlo-reweight` | ML (PRISM) NLO reweighting of the FxFx W/DY samples (CMS AN-2026/042); needs `data/NLORW/` (ONNX model and `negativeReweight` extension, not in git: copy them from `/eos/cms/store/group/phys_btag/2DSF/BTVNanoComm/inputs_V5/NLORW/`); tree branch `nloWeight`, variation `nlo_ml_onoff` |
 | `runner.py --local-copy` | copy the input files to the job directory first (xrdcp) |
 | `runner.py --tagger-compare` | logit(score) histograms of several taggers for the tagger data/MC comparison |
 | `condor/submitter.py --configs <json>` | grouped jobs: one job takes a batch of input files and runs every (workflow, campaign) config that reads them |
