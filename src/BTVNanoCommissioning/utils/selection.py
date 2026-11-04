@@ -256,8 +256,28 @@ def ele_mvatightid(events, campaign):
 
 
 def ele_promptmvaid(events, campaign):
+    try:
+        key = (
+            "ele_promptmva",
+            campaign,
+            _chunk(events),
+            _coll_fingerprint(events.Electron),
+        )
+    except Exception:
+        return _ele_promptmvaid(events, campaign)
+    return _cached(key, lambda: _ele_promptmvaid(events, campaign))
+
+
+def _ele_promptmvaid(events, campaign):
     # https://indico.cern.ch/event/1575017/contributions/6635248/attachments/3115862/5524310/EGammaAug08.pdf
-    if campaign not in ["Summer24", "CustomSummer24", "Winter25", "Prompt25"]:
+    if campaign not in [
+        "Summer24",
+        "CustomSummer24",
+        "CustomSummer24UParTPaper",
+        "CustomSummer25",
+        "Winter25",
+        "Prompt25",
+    ]:
         # No promptMVA WP is defined/validated for this campaign yet. All
         # current call sites already gate on the campaign list above before
         # calling this function, so this branch should be unreachable; it's
@@ -267,9 +287,30 @@ def ele_promptmvaid(events, campaign):
         )
     ele_etaSC = _ele_etaSC(events, campaign)
     elemask = (
-        (abs(ele_etaSC) < 1.4442) | ((abs(ele_etaSC) > 1.566) & (abs(ele_etaSC) < 2.5))
-    ) & (events.Electron.promptMVA >= 0.8)
-    # ) & (events.Electron.promptMVA >= 0.9)
+        (abs(ele_etaSC) < 1.4442)
+        | ((abs(ele_etaSC) > 1.566) & (abs(ele_etaSC) < 2.4))
+        # ) & (events.Electron.promptMVA >= 0.8) #Medium
+    ) & (
+        events.Electron.promptMVA >= 0.9
+    )  # Tight
+
+    # we also need to add the following cuts as preselection:
+    # miniPFRelIso_all < 0.4
+    # sip3d < 8
+    # |dxy| < 0.05
+    # |dz| < 0.1
+    # pT > 10 GeV
+    # Missing inner hits < 2
+    # |eta| < 2.4 (analysis choice, user 2026-10-23; EGM preselection is 2.5)
+
+    elemask = elemask & (events.Electron.miniPFRelIso_all < 0.4)
+    elemask = elemask & (events.Electron.sip3d < 8)
+    elemask = elemask & (abs(events.Electron.dxy) < 0.05)
+    elemask = elemask & (abs(events.Electron.dz) < 0.1)
+    elemask = elemask & (events.Electron.pt > 10)
+    # elemask =  elemask & (events.Electron.MissingInnerHits < 2)
+    elemask = elemask & (abs(events.Electron.eta) < 2.4)
+
     return elemask
 
 
@@ -295,6 +336,14 @@ def mu_idiso(events):
 
 
 def mu_promptmvaid(events):
+    try:
+        key = ("mu_promptmva", _chunk(events), _coll_fingerprint(events.Muon))
+    except Exception:
+        return _mu_promptmvaid(events)
+    return _cached(key, lambda: _mu_promptmvaid(events))
+
+
+def _mu_promptmvaid(events):
     # https://muon-wiki.docs.cern.ch/guidelines/recommendations/#prompt-mva-formerly-tth-mva
     # https://muon-wiki.docs.cern.ch/guidelines/recommendations/#muon-isolation
     # https://cms-talk.web.cern.ch/t/prompt-mva-sfs-definition/132578
@@ -304,6 +353,37 @@ def mu_promptmvaid(events):
         & (events.Muon.tightId > 0.5)
         & (events.Muon.promptMVA > 0.64)
     )
+
+    # additionally the following cuts as preselection:
+    # miniPFRelIso_all < 0.4
+    # sip3d < 8
+    # |dxy| < 0.05 cm
+    # |dz| < 0.1 cm
+    # pT > 10 GeV
+    # abs eta < 2.4
+    # isGlobal || isTracker
+    # isPFCand == 1
+    # mediumID == 1
+
+    mumask = mumask & (events.Muon.miniPFRelIso_all < 0.4)
+    mumask = mumask & (events.Muon.sip3d < 8)
+    mumask = mumask & (abs(events.Muon.dxy) < 0.05)
+    mumask = mumask & (abs(events.Muon.dz) < 0.1)
+    mumask = mumask & (events.Muon.pt > 10)
+    mumask = mumask & (events.Muon.isGlobal | events.Muon.isTracker)
+    # Muon_isPFCand is not written by NanoAODv15, and this function is only
+    # ever reached for v15 campaigns (Summer24, CustomSummer24, Winter25,
+    # Prompt25 -- older campaigns route to mu_idiso instead), so the branch is
+    # absent every time. Verified by direct inspection of the Summer24,
+    # CustomSummer24 and Prompt25 tuples: 54 Muon_* branches, no isPFCand.
+    # Guarded rather than deleted so the cut applies again if a production
+    # restores the branch. Nothing is lost while it is absent: the POG Tight
+    # and Medium muon IDs both require isPFMuon, and tightId (above) and
+    # mediumId (below) are both already applied here.
+    if hasattr(events.Muon, "isPFCand"):
+        mumask = mumask & (events.Muon.isPFCand == 1)
+    mumask = mumask & (events.Muon.mediumId == 1)
+
     return mumask
 
 
