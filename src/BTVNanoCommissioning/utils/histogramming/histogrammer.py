@@ -275,20 +275,28 @@ def histo_writter(pruned_ev, output, weights, systematics, isSyst, SF_map):
         if "MuonJet" in pruned_ev.fields:
             smflav = ak.zeros_like(pruned_ev.MuonJet.pt, dtype=int)
 
-    # Loop over the systematic variations
-    for syst in systematics:
-        if isSyst == False and syst != "nominal":
-            break
-        # Weight modifications for systematics
-        weight = (
-            weights.weight()
-            if syst == "nominal" or syst not in list(weights.variations)
-            else weights.weight(modifier=syst)
-        )
-        syst_perjet = syst
-        syst = np.full(len(weight), syst)
+    # Fill code for one systematic variation
+    def _fill_all(output, weight, syst_perjet):
+        nonlocal nj
+        syst = np.full(len(weight), syst_perjet)
+        jet_i = {}
+
+        def _jet_i(i):
+            # jet i of the events with >= i+1 SelJets, with its flavour, weight and syst label (once per pass)
+            if i not in jet_i:
+                m = ak.count(pruned_ev.SelJet["pt"], axis=1) >= (i + 1)
+                jet_i[i] = (
+                    pruned_ev.SelJet[m][:, i],
+                    genflavor[m][:, i],
+                    weight[m],
+                    syst[m],
+                )
+            return jet_i[i]
+
         # Loop over the histograms
         for histname, h in output.items():
+            if "_logit_" in histname and syst_perjet not in ("nominal", SYST_TOKEN):
+                continue
             # Tagger score histograms
             if (
                 "Deep" in histname
@@ -465,16 +473,7 @@ def histo_writter(pruned_ev, output, weights, systematics, isSyst, SF_map):
                             syst,
                         )
                     else:
-                        mask_njets = ak.count(pruned_ev.SelJet.pt, axis=1) >= (i + 1)
-                        temp_SelJet = pruned_ev.SelJet[mask_njets]
-                        temp_genflavor = genflavor[mask_njets]
-                        temp_weight = weight[mask_njets]
-                        temp_syst = syst[mask_njets]
-                        sel_jet, flav, wgt = (
-                            temp_SelJet[:, i],
-                            temp_genflavor[:, i],
-                            temp_weight,
-                        )
+                        sel_jet, flav, wgt, temp_syst = _jet_i(i)
                     if str(i) in histname:
                         if "dr_mujet" in histname:
                             h.fill(
@@ -547,7 +546,9 @@ def histo_writter(pruned_ev, output, weights, systematics, isSyst, SF_map):
                     for i in range(nj):
                         if not histname.endswith(str(i)):
                             continue
-                        if nj > 1:
+                        if nj > 1 and "MuonJet" not in pruned_ev.fields:
+                            seljet, flav, wgt, fsyst = _jet_i(i)
+                        elif nj > 1:
                             # not every event has >=(i+1) jets (e.g. DY with
                             # up to 3 jets stored, but not guaranteed 3/event)
                             mask_njets = ak.count(seljets.pt, axis=1) >= (i + 1)
@@ -813,4 +814,29 @@ def histo_writter(pruned_ev, output, weights, systematics, isSyst, SF_map):
         if any(k.startswith("sf2d_") for k in output.keys()):
             _fill_sf2d_histograms(output, pruned_ev.SelJet, genflavor, weight, syst)
 
+    variations = set(weights.variations)
+
+    def weight_for(syst):
+        if syst == "nominal" or syst not in variations:
+            return weights.weight()
+        return weights.weight(modifier=syst)
+
+    systs = list(
+        itertools.takewhile(
+            lambda s: not (isSyst == False and s != "nominal"), systematics
+        )
+    )
+    if "MuonJet" in pruned_ev.fields:
+        # the btag branch sets nj = 1 for all later histograms and variations: keep the plain loop
+        for syst in systs:
+            _fill_all(output, weight_for(syst), syst)
+    else:
+        replay_fills(
+            output,
+            _fill_all,
+            systs,
+            weight_for,
+            len(weights.weight()),
+            skip=lambda name, syst: "_logit_" in name and syst != "nominal",
+        )
     return output
