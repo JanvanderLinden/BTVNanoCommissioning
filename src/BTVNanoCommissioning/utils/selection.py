@@ -106,6 +106,8 @@ def _jet_id_flags(events, campaign):
         "Winter24",
         "Summer24",
         "CustomSummer24",
+        "CustomSummer24UParTPaper",
+        "CustomSummer25",
         "Winter25",
         "Prompt25",
     ]:
@@ -1069,6 +1071,9 @@ btag_wp_dict = {
 # CustomSummer24 is a private NanoAODv15 production on the same MiniAOD
 # conditions as Summer24 -- reuse its precomputed WP thresholds.
 btag_wp_dict["2024_CustomSummer24"] = btag_wp_dict["2024_Summer24"]
+btag_wp_dict["2024_CustomSummer24UParTPaper"] = btag_wp_dict["2024_Summer24"]
+# CustomSummer25 uses the CustomSummer24 MC, so the WP boundaries stay the same.
+btag_wp_dict["2025_CustomSummer25"] = btag_wp_dict["2024_CustomSummer24"]
 
 
 import os, correctionlib
@@ -1373,3 +1378,5 @@ met_filters = {
 # CustomSummer24 is a private NanoAODv15 production on the same MiniAOD
 # conditions as Summer24 -- reuse its MET filter list.
 met_filters["CustomSummer24"] = met_filters["Summer24"]
+met_filters["CustomSummer24UParTPaper"] = met_filters["Summer24"]
+met_filters["CustomSummer25"] = met_filters["Prompt25"]

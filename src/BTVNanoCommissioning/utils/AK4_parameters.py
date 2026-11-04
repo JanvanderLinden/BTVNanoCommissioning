@@ -765,3 +765,41 @@ correction_config = {
 # CustomSummer24: private NanoAODv15 production (extra taggers, phys03/USER samples)
 # on top of the same Summer24 MiniAOD conditions -- reuse Summer24 corrections as-is.
 correction_config["CustomSummer24"] = correction_config["Summer24"]
+correction_config["CustomSummer24UParTPaper"] = correction_config["Summer24"]
+
+# CustomSummer25: CustomSummer24 private MC + private 2025 data NanoTuples. Uses the
+# official "2025 data on Summer24 MC" JME era (Run3-25Prompt-Summer24-NanoAODv15) for
+# MC and data alike; lepton SFs as for Prompt25 (2025Prompt EGM, 2025 MUO).
+correction_config["CustomSummer25"] = {
+    **correction_config["Prompt25"],
+    "default": {
+        "DC": "Cert_Collisions2025_391658_398903_Golden.json",
+        "LUM": "puWeights_2025pp_Golden_Summer24_25ns_69200ub.json.gz",
+        "JME": {
+            "MC": "Summer24Prompt25_V3 Summer24Prompt25_JRV2",
+            "Run2025B": "Summer24Prompt25_V3",
+            "Run2025C": "Summer24Prompt25_V3",
+            "Run2025D": "Summer24Prompt25_V3",
+            "Run2025E": "Summer24Prompt25_V3",
+            "Run2025F": "Summer24Prompt25_V3",
+            "Run2025G": "Summer24Prompt25_V3",
+        },
+        "jetveto": {"Summer24Prompt25_RunCDEFG_V1": "jetvetomap"},
+        # The 2025Prompt EGM era has no electron HLT SFs and no PromptMVA ID SFs (the
+        # selection uses PromptMVA-Tight): take electron reco/ID/HLT SFs from the 2024 era as a
+        # stand-in. Electron scale/smearing keeps its own era (separate "electronSS" key).
+        "cvmfs_override": {
+            "EGM": "Run3-24CDEReprocessingFGHIPrompt-Summer24-NanoAODv15"
+        },
+    },
+}
+for _wf, _cfg in correction_config["CustomSummer25"].items():
+    if (
+        _wf != "default"
+        and "EGM" in _cfg
+        and "EGM" in correction_config["Summer24"].get(_wf, {})
+    ):
+        correction_config["CustomSummer25"][_wf] = {
+            **_cfg,
+            "EGM": correction_config["Summer24"][_wf]["EGM"],
+        }

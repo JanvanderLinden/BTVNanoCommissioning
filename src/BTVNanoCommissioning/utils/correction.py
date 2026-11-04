@@ -896,7 +896,14 @@ def calc_T1_MET(
     MET_x_baseline = met_raw.pt * np.cos(met_raw.phi)
     MET_y_baseline = met_raw.pt * np.sin(met_raw.phi)
 
-    if campaign in ["Summer24", "CustomSummer24", "Winter25", "Prompt25"]:  # NanoAODv15
+    if campaign in [
+        "Summer24",
+        "CustomSummer24",
+        "CustomSummer24UParTPaper",
+        "CustomSummer25",
+        "Winter25",
+        "Prompt25",
+    ]:  # NanoAODv15
         jet_mask = (
             (shifted_jets["pt_noMu_fullcorr"] > 15.0)
             & (abs(shifted_jets["eta"]) < 5.2)
@@ -1929,7 +1936,15 @@ def EGM_shifts(shifts, correct_map, events, isRealData, systematic=False):
     events_run = ak.flatten(ak.broadcast_arrays(events.run, ele.eta)[0])
     ele_etaSC = (
         ak.flatten(ele.superclusterEta)
-        if correct_map["campaign"] in ["Summer24", "CustomSummer24", "Winter25", "Prompt25"]
+        if correct_map["campaign"]
+        in [
+            "Summer24",
+            "CustomSummer24",
+            "CustomSummer24UParTPaper",
+            "CustomSummer25",
+            "Winter25",
+            "Prompt25",
+        ]
         else ak.flatten(ele.eta + ele.deltaEtaSC)
     )
     ele_r9 = ak.flatten(ele.r9)
@@ -2701,7 +2716,7 @@ def eleSFs(ele, correct_map, weights, syst=True, isHLT=False):
                             sfs_down = np.where(masknone, 1.0, sfs_down)
 
                     else:
-                        if "Prompt25" in correct_map["campaign"]:
+                        if correct_map["campaign"] in ["Prompt25", "CustomSummer25"]:
                             sfs_low = np.ones_like(ele_pt_low)
                         else:
                             sfs_low = np.where(
@@ -2736,7 +2751,10 @@ def eleSFs(ele, correct_map, weights, syst=True, isHLT=False):
                         sfs = np.where(masknone, 1.0, sfs)
 
                         if syst:
-                            if "Prompt25" in correct_map["campaign"]:
+                            if correct_map["campaign"] in [
+                                "Prompt25",
+                                "CustomSummer25",
+                            ]:
                                 sfs_up_low = np.ones_like(ele_pt_low)
                                 sfs_down_low = np.ones_like(ele_pt_low)
                             else:
@@ -2973,11 +2991,21 @@ def muSFs(mu, correct_map, weights, syst=False, isHLT=False):
             mu = allmu[:, nmu]
             masknone = ak.is_none(mu.pt)
             if "Trig" in sf:
-                mu_pt = np.clip(mu.pt, 26.0, None)
+                # lowest pT bin edge of the trigger SF: 29 GeV for IsoMu27, 26 GeV for IsoMu24
+                trig_min = 29.0 if "IsoMu27" in correct_map["MUO_cfg"][sf] else 26.0
+                mu_pt = np.clip(mu.pt, trig_min, None)
             else:
                 pt_min = (
                     10.0
-                    if correct_map["campaign"] in ["Summer24", "CustomSummer24", "Winter25", "Prompt25"]
+                    if correct_map["campaign"]
+                    in [
+                        "Summer24",
+                        "CustomSummer24",
+                        "CustomSummer24UParTPaper",
+                        "CustomSummer25",
+                        "Winter25",
+                        "Prompt25",
+                    ]
                     else 15.0
                 )
                 mu_pt = np.clip(mu.pt, pt_min, None)

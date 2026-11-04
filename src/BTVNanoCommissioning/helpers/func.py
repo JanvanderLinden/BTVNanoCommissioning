@@ -8,11 +8,14 @@ import collections
 
 from pathlib import Path
 
-
 # Campaigns that aren't backed by their own CVMFS metadata directory and should
 # instead resolve to another campaign's corrections (e.g. a private NanoAOD
 # production reusing the same MiniAOD conditions as an official campaign).
-_CAMPAIGN_ALIASES = {"CustomSummer24": "Summer24"}
+_CAMPAIGN_ALIASES = {
+    "CustomSummer24": "Summer24",
+    "CustomSummer24UParTPaper": "Summer24",
+    "CustomSummer25": "Prompt25",
+}
 
 
 def campaign_map():
@@ -215,9 +218,7 @@ def SV_link(events, event_level, jetindx):
             has_sv = has_jet & (svidx1 >= 0) & (svidx1 < nsv)
             safe_svidx = ak.where(has_sv, svidx1, 0)
             mass = ak.where(has_sv, _local_pick(sv.mass, safe_svidx, -1.0), -1.0)
-            dlensig = ak.where(
-                has_sv, _local_pick(sv.dlenSig, safe_svidx, -1.0), -1.0
-            )
+            dlensig = ak.where(has_sv, _local_pick(sv.dlenSig, safe_svidx, -1.0), -1.0)
             return mass, dlensig
 
         # No Jet->SV index in this production: match by dR instead. The
