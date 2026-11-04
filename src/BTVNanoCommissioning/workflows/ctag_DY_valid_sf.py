@@ -9,6 +9,7 @@ from BTVNanoCommissioning.utils.correction import (
     reweighting,
 )
 from BTVNanoCommissioning.helpers.func import (
+    accumulate_shifts,
     update,
     dump_lumi,
     PFCand_link,
@@ -29,6 +30,8 @@ from BTVNanoCommissioning.utils.selection import (
     mu_idiso,
     ele_mvatightid,
     MET_filters,
+    fineflav,
+    jet_veto_lepton_clean,
 )
 
 
@@ -149,6 +152,8 @@ class NanoProcessor(processor.ProcessorABC):
         if "2D" in self.selMod and self._campaign in [
             "Summer24",
             "CustomSummer24",
+            "CustomSummer24UParTPaper",
+            "CustomSummer25",
             "Winter25",
             "Prompt25",
         ]:  # NanoAODv15
@@ -160,6 +165,8 @@ class NanoProcessor(processor.ProcessorABC):
         if "2D" in self.selMod and self._campaign in [
             "Summer24",
             "CustomSummer24",
+            "CustomSummer24UParTPaper",
+            "CustomSummer25",
             "Winter25",
             "Prompt25",
         ]:  # NanoAODv15
@@ -218,15 +225,26 @@ class NanoProcessor(processor.ProcessorABC):
         else:
             jetmask = jet_id(events, self._campaign)
 
+        if "2D" in self.selMod:
+            # clean against the shared loose veto-lepton collections (Run 2
+            # parity); the Z leptons are a subset of these by construction.
+            # None-handling documented in jet_veto_lepton_clean.
+            lep_iso = jet_veto_lepton_clean(events, self._campaign)
+        else:
+            lep_iso = pl_iso & nl_iso
+
         jet_sel = ak.fill_none(
-            pl_iso & nl_iso & jetmask,
+            lep_iso & jetmask,
             False,
             axis=-1,
         )
 
         event_jet = events.Jet[jet_sel]
 
-        req_jets = ak.count(event_jet.pt, axis=1) >= 1
+        if "2D" in self.selMod:
+            req_jets = ak.count(event_jet.pt, axis=1) == 1
+        else:
+            req_jets = ak.count(event_jet.pt, axis=1) >= 1
 
         # store jet index for PFCands, create mask on the jet index
         jetindx = ak.mask(
@@ -243,6 +261,30 @@ class NanoProcessor(processor.ProcessorABC):
         selection = (
             req_lumi & req_trig & req_dilep & req_dilepmass & req_jets & req_metfilter
         )
+
+        if "2D" in self.selMod:
+            # Run 2 parity: balanced Z + 1-jet topology.
+            #
+            # The jet/Z pT balance cut (Run 2: 0.75 < pT(jet)/pT(Z) < 1.25) is
+            # DELIBERATELY NOT APPLIED. Measured on CustomSummer24 MC: it costs
+            # 49 % of the probe jets -- the single most expensive cut in this
+            # channel -- while moving the light-jet composition by only ~1 pp
+            # (gluon fraction 0.289 -> 0.279, `undef` 0.053 -> 0.040). The
+            # light-jet statistics it removes is what makes SF_flavL in the
+            # b-like categories (B0/B1/B2) unmeasurable: with the cut, the
+            # Asimov sigma of SF_flavL_B1 degrades from 0.100 to 0.243 and
+            # B2/B4 fall below the prefit Fisher gate entirely.
+            #
+            # What actually keeps this sample quark-rich is taking ONE probe per
+            # event instead of every selected jet (gluon fraction 0.384 -> 0.306),
+            # i.e. `njet == 1` plus a single stored probe -- not the balance cut.
+            # So the purity argument is served by the jet count, and the balance
+            # cut only costs resolution. Keep dphi(Z,jet) and pT(Z), which are
+            # cheap (-18 % combined) and remove the genuinely unbalanced tail.
+            jet0 = ak.pad_none(event_jet, 1, axis=1)[:, 0]
+            req_zjet_dphi = ak.fill_none(abs(dilep_mass.delta_phi(jet0)) > 2, False)
+            req_dilep_pt = ak.fill_none(dilep_mass.pt > 25, False)
+            selection = selection & req_zjet_dphi & req_dilep_pt
 
         if "QG" in self.selMod:
             temp_jet = ak.pad_none(event_jet, 1, axis=1)
@@ -309,6 +351,12 @@ class NanoProcessor(processor.ProcessorABC):
             # keep up to 3 jets/event so jet1, jet2 (and their SV info) are
             # stored alongside jet0, not just the leading jet
             pruned_ev["SelJet"] = event_jet[event_level][:, :3]
+            if (
+                "2D" in self.selMod
+                and not isRealData
+                and "nBHadrons" in pruned_ev.SelJet.fields
+            ):
+                pruned_ev["SelJet", "fineFlav"] = fineflav(pruned_ev.SelJet)
 
         if isMu:
             pruned_ev["MuonPlus"] = sposmu
