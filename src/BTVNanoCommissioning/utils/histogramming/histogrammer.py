@@ -1,8 +1,98 @@
+import itertools
+
 import awkward as ak
 import numpy as np
 from BTVNanoCommissioning.helpers.func import flatten
 from .hist_helpers import get_hist_collections, get_axes_collections
 from .histograms.sf2d import SCHEMES as SF2D_SCHEMES
+from .histograms.sf2d import TAG_LADDER_THRESHOLDS, TAG_SEL_CODES
+
+
+def _logit(x):
+    # scores outside (0, 1) (defaults, jets outside a pT bin) go to underflow
+    ok = (x > 0) & (x < 1)
+    xs = ak.where(ok, x, 0.5)
+    return ak.where(ok, np.log(xs / (1.0 - xs)), -999.0)
+
+
+SYST_TOKEN = "__syst__"
+
+
+class _FillRecorder:
+    def __init__(self, name, hist, calls):
+        self.name, self.hist, self.calls = name, hist, calls
+
+    def fill(self, *args, **kwargs):
+        self.calls.append((self.name, self.hist, args, kwargs))
+
+
+def _to_numpy(x):
+    if isinstance(x, ak.Array):
+        try:
+            return ak.to_numpy(x)
+        except Exception:
+            return x
+    return x
+
+
+def _is_token(x):
+    if isinstance(x, str):
+        return x == SYST_TOKEN
+    return (
+        isinstance(x, np.ndarray)
+        and x.dtype.kind in "USO"
+        and (len(x) == 0 or x[0] == SYST_TOKEN)
+    )
+
+
+def replay_fills(output, fill_all, systematics, weight_for, n_events, skip=None):
+    """Fill all histograms for all weight variations at the cost of one pass.
+
+    fill_all(output, weight, syst) runs the fill code once with weight = event
+    index and syst = SYST_TOKEN; every fill call is recorded. The calls are then
+    repeated per variation with weight = weight_for(syst)[index] and the real
+    syst label, in the original order, so the histograms are identical. Valid
+    only if fill_all uses the weight just for indexing/masking/broadcasting."""
+    calls = []
+    fill_all(
+        {k: _FillRecorder(k, h, calls) for k, h in output.items()},
+        np.arange(n_events, dtype=np.float64),
+        SYST_TOKEN,
+    )
+    rec = []
+    for name, h, args, kwargs in calls:
+        kw = {k: _to_numpy(v) for k, v in kwargs.items()}
+        idx = kw.pop("weight", None)
+        if idx is not None:
+            idx = np.asarray(idx).astype(np.int64)
+        args = [_to_numpy(a) for a in args]
+        # a scalar label is ~10x faster to fill than an array of labels; it needs
+        # one non-empty array argument to broadcast against (else keep the array)
+        scalar = any(
+            isinstance(x, np.ndarray) and not _is_token(x) and x.ndim and len(x)
+            for x in (*args, *kw.values())
+        )
+        rec.append((name, h, args, kw, idx, scalar))
+    for syst in systematics:
+        w = weight_for(syst)
+        for name, h, args, kw, idx, scalar in rec:
+            if skip is not None and skip(name, syst):
+                continue
+            sub = lambda x: (
+                (
+                    np.full(len(x), syst)
+                    if isinstance(x, np.ndarray) and not scalar
+                    else syst
+                )
+                if _is_token(x)
+                else x
+            )
+            a = [sub(x) for x in args]
+            k = {key: sub(v) for key, v in kw.items()}
+            if idx is None:
+                h.fill(*a, **k)
+            else:
+                h.fill(*a, weight=w[idx], **k)
 
 
 def _fill_sf2d_histograms(output, seljets, genflavor, weight, syst):
@@ -14,14 +104,17 @@ def _fill_sf2d_histograms(output, seljets, genflavor, weight, syst):
 
     An svmass template is filled only where one was booked, which is the
     channel's own declaration that SelJet_svmass is trustworthy there (see
-    histograms/sf2d.py). Jets with no matched SV carry svmass = -1, which
-    falls outside the [0,10] GeV axis range and so is naturally excluded.
+    histograms/sf2d.py). `svmass` has no cone cut -- it is the mass of the
+    closest SV *in the event*, not necessarily this jet's -- so a jet with
+    nSVs == 0 can still carry a borrowed non-negative mass. The joint gate is
+    applied here: svmass is forced to -1 (bin 0 on the variable axis) wherever
+    nSVs == 0, regardless of what SelJet.svmass itself holds.
     """
-    flat_pt = flatten(seljets.pt)
+    flat_pt = flatten(seljets["pt"])
     if len(flat_pt) == 0:
         return
     flat_flav = flatten(genflavor)
-    flat_weight = flatten(ak.broadcast_arrays(weight, seljets.pt)[0])
+    flat_weight = flatten(ak.broadcast_arrays(weight, seljets["pt"])[0])
     flat_syst = np.full(len(flat_pt), syst[0])
 
     for scheme, (branch, _codes) in SF2D_SCHEMES.items():
@@ -41,13 +134,19 @@ def _fill_sf2d_histograms(output, seljets, genflavor, weight, syst):
             )
 
         svmass_name = f"sf2d_{scheme}_svmass"
-        if svmass_name in output and "svmass" in seljets.fields:
+        if (
+            svmass_name in output
+            and "svmass" in seljets.fields
+            and "nSVs" in seljets.fields
+        ):
+            flat_nsv = flatten(seljets.nSVs)
+            flat_svmass = np.where(flat_nsv == 0, -1.0, flatten(seljets.svmass))
             output[svmass_name].fill(
                 syst=flat_syst,
                 flav=flat_flav,
                 tagcat=flat_tagcat,
                 pt=flat_pt,
-                svmass=flatten(seljets.svmass),
+                svmass=flat_svmass,
                 weight=flat_weight,
             )
 
@@ -310,8 +409,29 @@ def histo_writter(pruned_ev, output, weights, systematics, isSyst, SF_map):
                     flatten(pruned_ev.SoftMuon[histname.replace("soft_l_", "")]),
                     weight=weight,
                 )
+            elif "norm" == histname:
+                output["norm"].fill(syst, weight=weight)
             elif "njet" == histname:
                 output["njet"].fill(syst, pruned_ev.njet, weight=weight)
+            elif histname.startswith("tag_ladder_"):
+                scheme = histname[len("tag_ladder_") :]
+                branch, _codes = SF2D_SCHEMES.get(scheme, (None, None))
+                if branch is not None and branch in pruned_ev.SelJet.fields:
+                    jetcat = pruned_ev.SelJet[branch]
+                    for thr in TAG_LADDER_THRESHOLDS:
+                        codes = TAG_SEL_CODES[scheme].get(thr)
+                        if codes is None:
+                            continue
+                        mask = ak.zeros_like(jetcat, dtype=bool)
+                        for code in codes:
+                            mask = mask | (jetcat == code)
+                        count = ak.to_numpy(ak.sum(mask, axis=1))
+                        output[histname].fill(
+                            syst=syst,
+                            threshold=np.full(len(count), thr),
+                            count=count,
+                            weight=weight,
+                        )
             elif "nbjet" == histname:
                 output["nbjet"].fill(syst, pruned_ev.nbjet, weight=weight)
             elif "ncjet" == histname:

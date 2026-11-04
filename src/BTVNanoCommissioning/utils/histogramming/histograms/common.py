@@ -13,6 +13,12 @@ def get_histograms(axes, **kwargs):
     include_njet = kwargs.get("include_njet", True)
     include_nmujet = kwargs.get("include_nmujet", False)
     include_nsoftmu = kwargs.get("include_nsoftmu", False)
+    # One-bin, syst-only sum of weights: the total event/jet norm of the
+    # channel, filled once per systematic. Present in every "common" channel
+    # (Run 2 parity: makePlotsTT1L.C's dedicated "Normalization" histogram),
+    # so `checkSFNorm.py`-style checks are a single-number read instead of an
+    # integral over a kinematic histogram.
+    include_norm = kwargs.get("include_norm", True)
 
     include_discriminators = kwargs.get("include_discriminators", True)
     include_common_definitions = kwargs.get("include_common_definitions", True)
@@ -30,6 +36,9 @@ def get_histograms(axes, **kwargs):
 
     if include_njet:
         hists["njet"] = Hist.Hist(*n_axes, Hist.storage.Weight())
+
+    if include_norm:
+        hists["norm"] = Hist.Hist(axes["syst"], Hist.storage.Weight())
 
     if include_nmujet:
         hists["nmujet"] = Hist.Hist(*n_axes, Hist.storage.Weight())
