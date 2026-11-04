@@ -106,7 +106,16 @@ correction_config = {
                 "electronSS": "Run2-2017-UL-NanoAODv15",
                 "jetveto": "Run2-2017-UL-NanoAODv15",
             },
+        },  # obj_eff only: pileup weights and the IsoMu27 trigger SF (other workflows keep "default")
+        "ObjEffM": {
+            "LUM": "puWeights.json.gz",
+            "MUO": {
+                "mu_ID": "NUM_TightID_DEN_TrackerMuons",
+                "mu_Iso": "NUM_TightRelIso_DEN_TightIDandIPCut",
+                "mu_Trig": "NUM_IsoMu27_DEN_CutBasedIdTight_and_PFIsoTight",
+            },
         },
+        "ObjEffE": {"LUM": "puWeights.json.gz"},
     },
     "2018-UL": {
         "default": {

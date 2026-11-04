@@ -73,6 +73,9 @@ from BTVNanoCommissioning.workflows.example import (
     NanoProcessor as ExampleProcessor,
 )
 
+## object efficiencies (Z tag-and-probe, Z counting, jets in Z events)
+from BTVNanoCommissioning.workflows.obj_eff import NanoProcessor as ObjEffProcessor
+
 ## SFl DY+Jets
 from BTVNanoCommissioning.workflows.DY_sfl import (
     NanoProcessor as NegTagDYValidSFProcessor,
@@ -175,5 +178,8 @@ workflows["BTA"] = BTA_processor
 workflows["BTA_addPFMuons"] = partial(BTA_processor, addPFMuons=True)
 workflows["BTA_addAllTracks"] = partial(BTA_processor, addAllTracks=True)
 workflows["BTA_ttbar"] = BTA_ttbar_processor
+
+workflows["obj_eff_mu"] = partial(ObjEffProcessor, selectionModifier="M")
+workflows["obj_eff_e"] = partial(ObjEffProcessor, selectionModifier="E")
 
 __all__ = ["workflows"]
