@@ -7,6 +7,7 @@ import os
 import re
 import warnings
 from collections.abc import MutableMapping
+from types import SimpleNamespace
 
 import numpy as np
 import awkward as ak
@@ -31,6 +32,7 @@ from BTVNanoCommissioning.helpers.MuonScaRe import (
 )
 from BTVNanoCommissioning.helpers.func import campaign_map
 from BTVNanoCommissioning.utils.AK4_parameters import correction_config as config
+from BTVNanoCommissioning.utils.selection import jet_id
 
 _TTBAR_REWEIGHT_CACHE = {}
 _JPCALIB_CACHE = {}
@@ -4202,10 +4204,20 @@ def common_shifts(self, events):
         for shift in shifts:
             shift[0]["Electron"] = events.Electron
 
-    # Apply jet veto
+    # Apply jet veto. Run 3 JME recipe: reject the event if any jet with pT > 15 GeV,
+    # tightLepVeto ID and (chEmEF + neEmEF) < 0.9 lies in the map (nominal jets for all shifts)
     if "jetveto" in self.SF_map.keys():
-        jet_veto = jetveto(events.Jet, self.SF_map)
-        event_veto = ak.any(jet_veto > 0, axis=1)
+        jet_veto = jetveto(events.Jet, self.SF_map) > 0
+        if not self._campaign.endswith("-UL"):
+            jets = shifts[0][0]["Jet"]
+            jet_veto = (
+                jet_veto
+                & jet_id(
+                    SimpleNamespace(Jet=jets), self._campaign, max_eta=5.2, min_pt=15
+                )
+                & ((jets.chEmEF + jets.neEmEF) < 0.9)
+            )
+        event_veto = ak.any(jet_veto, axis=1)
         vetoed_events = events[~event_veto]
         for collections, _ in shifts:
             for key in collections:
