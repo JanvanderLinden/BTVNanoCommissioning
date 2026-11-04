@@ -105,19 +105,28 @@ def _load_SF_impl(year, campaign, selMod="default", syst=False):
             if os.path.exists(
                 f"/cvmfs/cms-griddata.cern.ch/cat/metadata/LUM/{_lum_cvmfs}/latest/"
             ):
-                try:
+                _lum_dir = (
+                    f"/cvmfs/cms-griddata.cern.ch/cat/metadata/LUM/{_lum_cvmfs}/latest"
+                )
+                if conf.get("LUM") and os.path.exists(f"{_lum_dir}/{conf['LUM']}"):
+                    # the file named in the campaign config (e.g. 2024 C-I only)
                     correct_map["LUM"] = correctionlib.CorrectionSet.from_file(
-                        f"/cvmfs/cms-griddata.cern.ch/cat/metadata/LUM/{_lum_cvmfs}/latest/puWeights.json.gz"
+                        f"{_lum_dir}/{conf['LUM']}"
                     )
-                except FileNotFoundError:
+                else:
                     try:
                         correct_map["LUM"] = correctionlib.CorrectionSet.from_file(
-                            f"/cvmfs/cms-griddata.cern.ch/cat/metadata/LUM/{_lum_cvmfs}/latest/puWeights_BCDEFGHI.json.gz"
+                            f"/cvmfs/cms-griddata.cern.ch/cat/metadata/LUM/{_lum_cvmfs}/latest/puWeights.json.gz"
                         )
                     except FileNotFoundError:
-                        correct_map["LUM"] = correctionlib.CorrectionSet.from_file(
-                            f"/cvmfs/cms-griddata.cern.ch/cat/metadata/LUM/{_lum_cvmfs}/latest/puWeights_2025pp_Golden_Summer24_25ns_69200ub.json.gz"
-                        )
+                        try:
+                            correct_map["LUM"] = correctionlib.CorrectionSet.from_file(
+                                f"/cvmfs/cms-griddata.cern.ch/cat/metadata/LUM/{_lum_cvmfs}/latest/puWeights_BCDEFGHI.json.gz"
+                            )
+                        except FileNotFoundError:
+                            correct_map["LUM"] = correctionlib.CorrectionSet.from_file(
+                                f"/cvmfs/cms-griddata.cern.ch/cat/metadata/LUM/{_lum_cvmfs}/latest/puWeights_2025pp_Golden_Summer24_25ns_69200ub.json.gz"
+                            )
             ## Otherwise custom files
             else:
                 _pu_path = f"BTVNanoCommissioning.data.LUM.{campaign}"

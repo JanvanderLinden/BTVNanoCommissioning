@@ -505,7 +505,8 @@ correction_config = {
     "Summer24": {
         "default": {
             "DC": "Cert_Collisions2024_378981_386951_Golden.json",
-            "LUM": "puWeights_BCDEFGHI.json.gz",
+            # 2024 analyses use eras C-I only (no 2024B)
+            "LUM": "puWeights_CDEFGHI.json.gz",
             "JME": {
                 "MC": "Summer24Prompt24_V5 Summer24Prompt24_JRV2",
                 "Run2024C": "Summer24Prompt24_V5",
