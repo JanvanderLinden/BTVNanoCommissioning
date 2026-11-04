@@ -466,6 +466,105 @@ def btag_wp(jets, year, campaign, tagger, borc, wp):
     return jet_mask
 
 
+def fineflav(jets):
+    """Fine-grained MC jet flavour (int8 per jet), Run 2 SFbc convention:
+
+    0 = b  (hadronFlavour==5, nBHadrons<=1)
+    1 = bb (hadronFlavour==5, nBHadrons>1)
+    2 = c  (hadronFlavour==4, nCHadrons<=1)
+    3 = cc (hadronFlavour==4, nCHadrons>1)
+    4 = uds (light, abs(partonFlavour) in {1,2,3})
+    5 = g   (light, partonFlavour==21)
+    6 = undefined (everything else: no gen match / PU (genJetIdx<0),
+        partonFlavour==0, light jets with stray b/c hadrons)
+
+    The genJetIdx<0 test takes precedence over all flavour tests (applied
+    as the final override below, so it always wins).
+    """
+    hflav = jets.hadronFlavour
+    nb = jets.nBHadrons
+    nc = jets.nCHadrons
+    pflav = jets.partonFlavour
+    light = (hflav == 0) & (nb == 0) & (nc == 0)
+    flav = ak.full_like(hflav, 6, dtype=np.int8)
+    flav = ak.where((hflav == 5) & (nb <= 1), 0, flav)
+    flav = ak.where((hflav == 5) & (nb > 1), 1, flav)
+    flav = ak.where((hflav == 4) & (nc <= 1), 2, flav)
+    flav = ak.where((hflav == 4) & (nc > 1), 3, flav)
+    flav = ak.where(light & (abs(pflav) >= 1) & (abs(pflav) <= 3), 4, flav)
+    flav = ak.where(light & (pflav == 21), 5, flav)
+    # no gen match (pileup) -> undefined, regardless of stored flavours
+    flav = ak.where(jets.genJetIdx < 0, 6, flav)
+    return ak.values_astype(flav, np.int8)
+
+
+def veto_lepton_collections(events, campaign):
+    """Loose lepton collections used to clean jets in the 2D SF selections
+    (Run 2 parity: mirror the DY/Wc dilepton-veto lepton definitions).
+
+    Returns (muons, electrons): muons pt>12, electrons pt>15, with the
+    prompt-MVA IDs for the NanoAODv15 campaigns and the older IDs otherwise.
+    """
+    if campaign in [
+        "Summer24",
+        "CustomSummer24",
+        "CustomSummer24UParTPaper",
+        "CustomSummer25",
+        "Winter25",
+        "Prompt25",
+    ]:  # NanoAODv15
+        muons = events.Muon[(events.Muon.pt > 12) & mu_promptmvaid(events)]
+        electrons = events.Electron[
+            (events.Electron.pt > 15) & ele_promptmvaid(events, campaign)
+        ]
+    else:
+        muons = events.Muon[(events.Muon.pt > 12) & mu_idiso(events)]
+        electrons = events.Electron[
+            (events.Electron.pt > 15) & ele_mvatightid(events, campaign)
+        ]
+    return muons, electrons
+
+
+def jet_veto_lepton_clean(events, campaign, cone=0.4):
+    """Per-jet mask: True when the jet is farther than `cone` from every
+    lepton of `veto_lepton_collections`. A None from ak.all means "no veto
+    lepton in this event" and is filled with True (the jet is clean).
+    Shared by the four 2D SF workflows so the cone and the None semantics
+    can only change in one place. Call it BEFORE reassigning events.Muon /
+    events.Electron to selected subsets.
+    """
+    try:
+        key = (
+            "jet_lepton_clean",
+            campaign,
+            cone,
+            _chunk(events),
+            _coll_fingerprint(events.Jet, ("eta", "phi")),
+            _coll_fingerprint(events.Muon),
+            _coll_fingerprint(events.Electron),
+        )
+    except Exception:
+        return _jet_veto_lepton_clean(events, campaign, cone)
+    return _cached(key, lambda: _jet_veto_lepton_clean(events, campaign, cone))
+
+
+def _jet_veto_lepton_clean(events, campaign, cone=0.4):
+    muons, electrons = veto_lepton_collections(events, campaign)
+    clean = None
+    for coll in (muons, electrons):
+        mask = ak.fill_none(
+            ak.all(
+                events.Jet.metric_table(coll) > cone,
+                axis=2,
+                mask_identity=True,
+            ),
+            True,
+            axis=-1,
+        )
+        clean = mask if clean is None else clean & mask
+    return clean
+
+
 _mapping = {
     1: {
         1: 0,
