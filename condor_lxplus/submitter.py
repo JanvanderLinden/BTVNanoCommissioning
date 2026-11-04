@@ -93,6 +93,8 @@ def get_main_parser():
             "Summer23BPix",
             "Summer24",
             "CustomSummer24",
+            "CustomSummer24UParTPaper",
+            "CustomSummer25",
             "2018-UL",
             "2017-UL",
             "2016preVFP-UL",
@@ -128,6 +130,19 @@ def get_main_parser():
             "ONNX up/down; 'full' additionally reserves hooks for frag/decay "
             "reweights. Default: %(default)s"
         ),
+    )
+    parser.add_argument(
+        "--nlo-reweight",
+        dest="nlo_reweight",
+        action="store_true",
+        help="Forwarded to runner.py --nlo-reweight",
+    )
+    parser.add_argument(
+        "--vjets-stitch",
+        dest="vjets_stitch",
+        default=None,
+        type=lambda p: os.path.abspath(p),
+        help="Forwarded to runner.py --vjets-stitch (FxFx W/DY LHE stitching json).",
     )
     parser.add_argument("--isArray", action="store_true", help="Output root files")
     parser.add_argument(

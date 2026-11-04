@@ -44,24 +44,38 @@ if current_value != expected_value:
     print(f"export X509_USER_PROXY=$HOME/x509up_u`id -u`")
     sys.exit(1)
 
-numlist = [i.strip() for i in open(f"{jobdir}/jobnum_list.txt", "r").readlines()]
+numlist = [i.split()[0] for i in open(f"{jobdir}/jobnum_list.txt", "r").readlines()]
 
 with open(f"{jobdir}/arguments.json") as f:
     args = json.load(f)
-outdir = args["outputDir"]
+configs = args.get("configs")
+if configs:  # one output per config that the job ran
+    split = {}
+    for f in glob(f"{jobdir}/split/*/split_samples.json"):
+        split.update(json.load(open(f)))
+    if updatexrootd:
+        sys.exit("ERROR: -u is not implemented for --configs job directories")
 
 toresubmit = []
 
 with alive_bar(len(numlist), title="Checking jobs") as bar:
     for n in numlist:
-        outfile = f"{outdir}/hists_{n}/hists_{n}.coffea"
-        if not os.path.isfile(outfile):
-            print(f"[red]Job {n}[/] does not have an output histogram file.")
-            toresubmit.append(n)
-        arraylist = glob(f"{outdir}/arrays_hists_{n}/*/*/*.root")
-        for rootfile in arraylist:
-            filesize = os.path.getsize(rootfile)
-            if filesize < 10 * 1024:  # Files smaller than 10 kB are likely zombies
+        outdirs = (
+            [
+                configs[int(i)]["outputDir"]
+                for i in {c for d in split[n].values() for cs in d.values() for c in cs}
+            ]
+            if configs
+            else [args["outputDir"]]
+        )
+        for outdir in outdirs:
+            outfile = f"{outdir}/hists_{n}/hists_{n}.coffea"
+            if not os.path.isfile(outfile):
+                print(f"[red]Job {n}[/] does not have an output histogram file.")
+                toresubmit.append(n)
+                break
+            arraylist = glob(f"{outdir}/arrays_hists_{n}/*/*/*.root")
+            if any(os.path.getsize(f) < 10 * 1024 for f in arraylist):  # zombies
                 print(f"[red]Job {n}[/] has at least one zombie root output file.")
                 toresubmit.append(n)
                 break
@@ -111,7 +125,7 @@ if updatexrootd:
 
 numlist2 = open(f"{jobdir}/jobnum_list_resubmit.txt", "w")
 for r in toresubmit:
-    numlist2.write(f"{r}\n")
+    numlist2.write(f"{r} {int(r) // 100}\n" if configs else f"{r}\n")
 numlist2.close()
 
 jdl = open(f"{jobdir}/submit.jdl", "r").readlines()
