@@ -27,6 +27,8 @@ _WEIGHT_BRANCHES = [
     "muWeight",
     "eleWeight",
     "ftagWeight",
+    "nloWeight",
+    "stitchWeight",
 ]
 
 arraySchema = {
@@ -104,8 +106,102 @@ arraySchema = {
         "SelJet_btagUParTAK4BvC",
         "SelJet_btagNoPIDParTAK4HFvLF",
         "SelJet_btagNoPIDParTAK4BvC",
+        "SelJet_btagUParTAK4NoAdvHFvLF",
+        "SelJet_btagUParTAK4NoAdvBvC",
+        "SelJet_btagUParTAK4NoAdvB",
+        "SelJet_btagUParTAK4NoAdvC",
+        "SelJet_btagUParTAK4NoAdvS",
+        "SelJet_btagUParTAK4NoAdvUDG",
+        "SelJet_btagUParTAK4NoAdvEle",
+        "SelJet_btagUParTAK4NoAdvMu",
+        "SelJet_btagUParTAK4NoAdvprobb",
+        "SelJet_btagUParTAK4NoAdvprobbb",
+        "SelJet_btagUParTAK4NoAdvCvB",
+        "SelJet_btagUParTAK4NoAdvCvL",
+        "SelJet_btagUParTAK4NoAdvCvNotB",
+        "SelJet_btagUParTAK4NoAdvQvG",
+        "SelJet_btagUParTAK4NoAdvSvCB",
+        "SelJet_btagUParTAK4NoAdvSvUDG",
+        "SelJet_btagUParTAK4NoAdvTauVJet",
+        "SelJet_fineFlav",  # fine MC flavour (selection.fineflav); MC only
+        # per-scheme 2D tag selections/counters (2D ttsemilep validation);
+        # absent names are simply not written for the other channels
+        "passTag_nopid_legacy",
+        "passTag_nopid_phase4",
+        "passTag_upart_legacy",
+        "nbjet_nopid_legacy",
+        "nbjet_nopid_phase4",
+        "nbjet_upart_legacy",
+        "ncjet_nopid_legacy",
+        "ncjet_nopid_phase4",
+        "ncjet_upart_legacy",
+    ],
+    # Dijet tag-and-probe: SLIM's probe-jet content (SelJet), the same content
+    # again for the away/tag jet so the swapped pairing can be rebuilt offline,
+    # the dijet topology variables the region is cut on (so the cuts can be
+    # tightened downstream), and the trigger prescale weight.
+    "SLIM_DIJET": _WEIGHT_BRANCHES
+    + [
+        "xSecWeight",
+        "psweight",
+        "njet",
+        "ptave",
+        "alpha",
+        "asym",
+        "dphi_jj",
+        "dr_j3",
+        # away-jet 2D category and tag class, one pair per tagger the tuple
+        # carries (dijet_2D.TAG_TAGGERS); absent names are simply not written
+        "tag_2Dbin_nopid",
+        "tag_cls_nopid",
+        "tag_2Dbin_upart",
+        "tag_cls_upart",
+        "SelJet_pt",
+        "SelJet_eta",
+        "SelJet_phi",
+        "SelJet_mass",
+        "SelJet_hadronFlavour",
+        "SelJet_partonFlavour",
+        "SelJet_svmass",
+        "SelJet_nSVs",
+        "SelJet_btagPNetHFvLF",
+        "SelJet_btagPNetBvC",
+        "SelJet_btagUParTAK4HFvLF",
+        "SelJet_btagUParTAK4BvC",
+        "SelJet_btagNoPIDParTAK4HFvLF",
+        "SelJet_btagNoPIDParTAK4BvC",
+        "SelJet_fineFlav",  # fine MC flavour (selection.fineflav); MC only
+        "TagJet_pt",
+        "TagJet_eta",
+        "TagJet_phi",
+        "TagJet_mass",
+        "TagJet_hadronFlavour",
+        "TagJet_partonFlavour",
+        "TagJet_svmass",
+        "TagJet_nSVs",
+        "TagJet_btagPNetHFvLF",
+        "TagJet_btagPNetBvC",
+        "TagJet_btagUParTAK4HFvLF",
+        "TagJet_btagUParTAK4BvC",
+        "TagJet_btagNoPIDParTAK4HFvLF",
+        "TagJet_btagNoPIDParTAK4BvC",
+        "TagJet_fineFlav",  # fine MC flavour (selection.fineflav); MC only
     ],
 }
+
+
+def _write_tree(fout, name, data):
+    """Write a dict of arrays as a TTree.
+
+    uproot >= 5.7 creates a ROOT::RNTuple for `fout[name] = data`, not a TTree.
+    ROOT 6.30 -- what the rest of the chain runs on -- cannot read that at all
+    ("Unknown class ROOT::RNTuple"), so normalizeArray.C's
+    `(TTree *)f->Get("Events")` comes back NULL, and hadd and the JSROOT-based
+    file viewers fail on it too. mktree()+extend() keeps the TTree format.
+    """
+    data = {k: ak.Array(v) for k, v in data.items()}
+    tree = fout.mktree(name, {k: ak.type(v) for k, v in data.items()})
+    tree.extend(data)
 
 
 def _flatten_to_perjet(ev, ref_collection):
@@ -234,6 +330,8 @@ def array_writer(
         pruned_event["muWeight"] = _partial([n for n in added if n.startswith("mu_")])
         pruned_event["eleWeight"] = _partial([n for n in added if n.startswith("ele_")])
         pruned_event["ftagWeight"] = _partial(_FTAG_SF_NAMES)
+        pruned_event["nloWeight"] = _partial(["nlo_vjet"])  # ML (PRISM) factor
+        pruned_event["stitchWeight"] = _partial(["vjets_stitch"])
 
         # Varied total weights, one branch per variation. Only on the nominal
         # shift: a JES-shifted tree's weight variations are the same set, and
