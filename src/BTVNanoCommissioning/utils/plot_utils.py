@@ -24,15 +24,17 @@ color_map = {
     "QCD": "#adad7d",
     "QCD($\\mu$)": "#656364",
     "Ph+jets": "#f2ab6d",
-    # https://btvweb.web.cern.ch/artworks/BTV_colorpalette/Palette.png
-    "udsg": "#15a3ef",  # blue
-    "ud": "#15a3ef",  # blue
-    "s": "#209A24",  # green
-    "g": "#7a21dd",  # purple
+    # flavour splits: (udsg, c, b, PU) / (uds, g, c, b, PU) / (ud, s, g, c, b, PU)
+    "udsg": "#c6c8cd",  # light grey
+    "uds": "#c6c8cd",
+    "ud": "#c6c8cd",
+    "s": "#15a3ef",  # blue
+    "g": "#a96b59",  # brown
     "pu": "#717581",  # grey
+    "PU": "#717581",
     "other": "#717581",  # grey
-    "c": "#ed1e02",  # red
-    "b": "#fcb302",  # yellow
+    "c": "#fcb302",  # yellow
+    "b": "#ed1e02",  # red
 }
 sample_mergemap = {
     # ttbar
@@ -74,6 +76,8 @@ sample_mergemap = {
         "ST_s-channel_4f_leptonDecays_TuneCP5_13TeV-amcatnlo-pythia8",
         "TBbartoLNu-s-channel_TuneCP5_13p6TeV_powheg-pythia8",
         "TbarBtoLNu-s-channel_TuneCP5_13p6TeV_powheg-pythia8",
+        "TBbarQto2Q-t-channel-4FS_TuneCP5_13p6TeV_powheg-madspin-pythia8",
+        "TbarBQto2Q-t-channel-4FS_TuneCP5_13p6TeV_powheg-madspin-pythia8",
     ],
     "tt+X": [
         "TTLNu-1Jets_TuneCP5_13p6TeV_amcatnloFXFX-pythia8",
@@ -82,6 +86,8 @@ sample_mergemap = {
         "TTLL_Bin-MLL-4to50_TuneCP5_13p6TeV_amcatnlo-pythia8",
         "TTLL_Bin-MLL-50_TuneCP5_13p6TeV_amcatnlo-pythia8",
         "TTZ-ZtoQQ-1Jets_TuneCP5_13p6TeV_amcatnloFXFXold-pythia8",
+        "TTH-Hto2B_Par-M-125_TuneCP5_13p6TeV_powheg-pythia8",
+        "TTH-HtoNon2B_Par-M-125_TuneCP5_13p6TeV_powheg-pythia8",
     ],
     # diboson
     "VV": [
@@ -104,6 +110,9 @@ sample_mergemap = {
         "WWto4Q_TuneCP5_13p6TeV_powheg-pythia8",
         "WWtoLNu2Q_TuneCP5_13p6TeV_powheg-pythia8",
         "WWto2L2Nu_TuneCP5_13p6TeV_powheg-pythia8",
+        "WZto2Nu2Q_TuneCP5_13p6TeV_powheg-pythia8",
+        "WZto4Q-1Jets-4FS_TuneCP5_13p6TeV_amcatnloFXFX-pythia8",
+        "ZZto4Q-1Jets_TuneCP5_13p6TeV_amcatnloFXFX-pythia8",
     ],
     "Z+jets": [
         "DYto2L-2Jets_MLL-10to50_TuneCP5_13p6TeV_amcatnloFXFX-pythia8",
@@ -116,6 +125,19 @@ sample_mergemap = {
         "DYto2E-2Jets_Bin-MLL-50_TuneCP5_13p6TeV_amcatnloFXFX-pythia8",
         "DYto2Mu-2Jets_Bin-MLL-50_TuneCP5_13p6TeV_amcatnloFXFX-pythia8",
         "DYto2Tau-2Jets_Bin-MLL-50_TuneCP5_13p6TeV_amcatnloFXFX-pythia8",
+        "DYto2E-2Jets_Bin-0J-MLL-50_TuneCP5_13p6TeV_amcatnloFXFX-pythia8",
+        "DYto2E-2Jets_Bin-1J-MLL-50_TuneCP5_13p6TeV_amcatnloFXFX-pythia8",
+        "DYto2E-2Jets_Bin-2J-MLL-50_TuneCP5_13p6TeV_amcatnloFXFX-pythia8",
+        "DYto2Mu-2Jets_Bin-0J-MLL-50_TuneCP5_13p6TeV_amcatnloFXFX-pythia8",
+        "DYto2Mu-2Jets_Bin-1J-MLL-50_TuneCP5_13p6TeV_amcatnloFXFX-pythia8",
+        "DYto2Mu-2Jets_Bin-2J-MLL-50_TuneCP5_13p6TeV_amcatnloFXFX-pythia8",
+        "DYto2Tau-2Jets_Bin-0J-MLL-50_TuneCP5_13p6TeV_amcatnloFXFX-pythia8",
+        "DYto2Tau-2Jets_Bin-1J-MLL-50_TuneCP5_13p6TeV_amcatnloFXFX-pythia8",
+        "DYto2Tau-2Jets_Bin-2J-MLL-50_TuneCP5_13p6TeV_amcatnloFXFX-pythia8",
+        "DYto2L-2Jets_Bin-MLL-50-PTLL-100_TuneCP5_13p6TeV_amcatnloFXFX-pythia8",
+        "DYto2L-2Jets_Bin-MLL-50-PTLL-200_TuneCP5_13p6TeV_amcatnloFXFX-pythia8",
+        "DYto2L-2Jets_Bin-MLL-50-PTLL-400_TuneCP5_13p6TeV_amcatnloFXFX-pythia8",
+        "DYto2L-2Jets_Bin-MLL-50-PTLL-600_TuneCP5_13p6TeV_amcatnloFXFX-pythia8",
     ],
     "W+jets": [
         "WtoENu-4Jets_TuneCP5_13p6TeV_madgraphMLM-pythia8",
@@ -155,6 +177,20 @@ sample_mergemap = {
         "WtoTauNu-2Jets_Bin-0J_TuneCP5_13p6TeV_amcatnloFXFX-pythia8",
         "WtoTauNu-2Jets_Bin-1J_TuneCP5_13p6TeV_amcatnloFXFX-pythia8",
         "WtoTauNu-2Jets_Bin-2J_TuneCP5_13p6TeV_amcatnloFXFX-pythia8",
+        "WtoLNu-2Jets_Bin-1J-PTLNu-40to100_TuneCP5_13p6TeV_amcatnloFXFX-pythia8",
+        "WtoLNu-2Jets_Bin-1J-PTLNu-100to200_TuneCP5_13p6TeV_amcatnloFXFX-pythia8",
+        "WtoLNu-2Jets_Bin-1J-PTLNu-200to400_TuneCP5_13p6TeV_amcatnloFXFX-pythia8",
+        "WtoLNu-2Jets_Bin-1J-PTLNu-400to600_TuneCP5_13p6TeV_amcatnloFXFX-pythia8",
+        "WtoLNu-2Jets_Bin-1J-PTLNu-600_TuneCP5_13p6TeV_amcatnloFXFX-pythia8",
+        "WtoLNu-2Jets_Bin-2J-PTLNu-40to100_TuneCP5_13p6TeV_amcatnloFXFX-pythia8",
+        "WtoLNu-2Jets_Bin-2J-PTLNu-100to200_TuneCP5_13p6TeV_amcatnloFXFX-pythia8",
+        "WtoLNu-2Jets_Bin-2J-PTLNu-200to400_TuneCP5_13p6TeV_amcatnloFXFX-pythia8",
+        "WtoLNu-2Jets_Bin-2J-PTLNu-400to600_TuneCP5_13p6TeV_amcatnloFXFX-pythia8",
+        "WtoLNu-2Jets_Bin-2J-PTLNu-600_TuneCP5_13p6TeV_amcatnloFXFX-pythia8",
+        "WtoLNu-2Jets_Bin-PTLNu-100_TuneCP5_13p6TeV_amcatnloFXFX-pythia8",
+        "WtoLNu-2Jets_Bin-PTLNu-200_TuneCP5_13p6TeV_amcatnloFXFX-pythia8",
+        "WtoLNu-2Jets_Bin-PTLNu-400_TuneCP5_13p6TeV_amcatnloFXFX-pythia8",
+        "WtoLNu-2Jets_Bin-PTLNu-600_TuneCP5_13p6TeV_amcatnloFXFX-pythia8",
     ],
     "DY": [
         "DYto2L-2Jets_Bin-1J-MLL-50-PTLL-40to100_TuneCP5_13p6TeV_amcatnloFXFX-pythia8",
@@ -187,7 +223,7 @@ sample_mergemap = {
         "QCD_Bin-PT-800to1000_Fil-MuEnriched_TuneCP5_13p6TeV_pythia8",
         "QCD_Bin-PT-1000_Fil-MuEnriched_TuneCP5_13p6TeV_pythia8",
         "QCD-4Jets_Bin-HT-40to70_TuneCP5_13p6TeV_madgraphMLM-pythia8",
-        "QCD-4Jets_Bin-HT-70to100_TuneCP5_13p6TeV_madgraphMLM-pythia",
+        "QCD-4Jets_Bin-HT-70to100_TuneCP5_13p6TeV_madgraphMLM-pythia8",
         "QCD-4Jets_Bin-HT-100to200_TuneCP5_13p6TeV_madgraphMLM-pythia8",
         "QCD-4Jets_Bin-HT-200to400_TuneCP5_13p6TeV_madgraphMLM-pythia8",
         "QCD-4Jets_Bin-HT-400to600_TuneCP5_13p6TeV_madgraphMLM-pythia8",
