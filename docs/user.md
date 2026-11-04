@@ -210,6 +210,20 @@ python runner.py --wf {wf} --json metadata/{args.campaign}/{types}_{args.campaig
 - Sometimes the global redirector is insufficient, you can increase the numbers of retries (only in parsl/dask) `--retries 30`, or skip the files `--skipbadfiles` and later reprocess the missing info by create the json with skipped files. Methods to create the json files discussed in the next part.
 :::
 
+#### Options for the 2D SF productions (V5, 2026-10)
+
+| Option | What it does |
+|---|---|
+| `runner.py --array-systs {none,weights,shifts,both}` | systematic content of the `--isArray` trees (V5: `weights`) |
+| `runner.py --vjets-stitch <json>` | LHE stitching of the FxFx W/DY samples; json in `src/BTVNanoCommissioning/data/STITCH/` (V5: `vjets_stitch_2024_processor.json`, made with `SFbc-2D/scripts/prod/stitchVjetsDerive.py`) |
+| `runner.py --nlo-reweight` | ML (PRISM) NLO reweighting of the FxFx W/DY samples (CMS AN-2026/042); needs `data/NLORW/` (ONNX model and `negativeReweight` extension); tree branch `nloWeight`, variation `nlo_ml_onoff` |
+| `runner.py --local-copy` | copy the input files to the job directory first (xrdcp) |
+| `runner.py --tagger-compare` | logit(score) histograms of several taggers for the tagger data/MC comparison |
+| `condor/submitter.py --configs <json>` | grouped jobs: one job takes a batch of input files and runs every (workflow, campaign) config that reads them |
+| `condor/submitter.py --runsPerJob N --disk 10GB --local-copy -y` | job size cap in (file, run) pairs, disk for the local copy, no interactive prompts |
+
+The full V5 command (`SFbc-2D/02_run_workflows.sh` with `GROUPED=1`) is in `SFbc-2D/scripts/prod/README_V5.md`.
+
 <details><summary>Other runner options</summary>
 <p>
 
