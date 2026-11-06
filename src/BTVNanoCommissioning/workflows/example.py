@@ -46,6 +46,7 @@ class NanoProcessor(processor.ProcessorABC):
         isArray=False,
         noHist=False,
         chunksize=75000,
+        ttbar_reweights="none",
     ):
         self._year = year
         self._campaign = campaign
@@ -55,6 +56,7 @@ class NanoProcessor(processor.ProcessorABC):
         self.noHist = noHist
         self.lumiMask = load_lumi(self._campaign)
         self.chunksize = chunksize
+        self.ttbar_reweights = ttbar_reweights
         ## Load corrections
         self.SF_map = load_SF(self._year, self._campaign)
 
@@ -65,7 +67,12 @@ class NanoProcessor(processor.ProcessorABC):
     ## Apply corrections on momentum/mass on MET, Jet, Muon
     def process(self, events):
         events = missing_branch(events)
-        sumws = reweighting(events, self.isSyst)
+        sumws = reweighting(
+            events,
+            self.isSyst,
+            ttbar_reweights=self.ttbar_reweights,
+            campaign=self._campaign,
+        )
         vetoed_events, shifts = common_shifts(self, events)
 
         return processor.accumulate(
@@ -91,25 +98,8 @@ class NanoProcessor(processor.ProcessorABC):
 
         if shift_name is None:
             output["sumw"] = sumws["sumw"]
-            if not isRealData and self.isSyst:
-                if "LHEPdfWeight" in events.fields:
-                    output["PDF_sumwUp"] = sumws["PDF_sumwUp"]
-                    output["PDF_sumwDown"] = sumws["PDF_sumwDown"]
-                    output["aS_sumwUp"] = sumws["aS_sumwUp"]
-                    output["aS_sumwDown"] = sumws["aS_sumwDown"]
-                    output["PDFaS_sumwUp"] = sumws["PDFaS_sumwUp"]
-                    output["PDFaS_sumwDown"] = sumws["PDFaS_sumwDown"]
-                if "LHEScaleWeight" in events.fields:
-                    output["muR_sumwUp"] = sumws["muR_sumwUp"]
-                    output["muR_sumwDown"] = sumws["muR_sumwDown"]
-                    output["muF_sumwUp"] = sumws["muF_sumwUp"]
-                    output["muF_sumwDown"] = sumws["muF_sumwDown"]
-                if "PSWeight" in events.fields:
-                    if len(events.PSWeight[0]) == 4:
-                        output["ISR_sumwUp"] = sumws["ISR_sumwUp"]
-                        output["ISR_sumwDown"] = sumws["ISR_sumwDown"]
-                        output["FSR_sumwUp"] = sumws["FSR_sumwUp"]
-                        output["FSR_sumwDown"] = sumws["FSR_sumwDown"]
+            # one sum per generator-level variation, see correction.reweighting
+            output.update({k: v for k, v in sumws.items() if k.startswith("sumw_")})
 
         ####################
         #    Selections    #
@@ -134,7 +124,7 @@ class NanoProcessor(processor.ProcessorABC):
         ## Muon cuts
         # muon twiki: https://twiki.cern.ch/twiki/bin/view/CMS/SWGuideMuonIdRun2
 
-        muon_sel = (events.Muon.pt > 15) & (mu_idiso(events, self._campaign))
+        muon_sel = (events.Muon.pt > 15) & (mu_idiso(events))
         event_mu = events.Muon[muon_sel]
         req_muon = ak.num(event_mu.pt) == 1
 
@@ -196,7 +186,7 @@ class NanoProcessor(processor.ProcessorABC):
             pruned_ev,
             self.SF_map,
             self.isSyst,
-            ttbar_reweights=getattr(self, "ttbar_reweights", "none"),
+            ttbar_reweights=self.ttbar_reweights,
             campaign=self._campaign,
         )
         # Configure systematics shifts

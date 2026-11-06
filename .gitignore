@@ -20,3 +20,16 @@ jobs_*
 .success
 arrays_*
 hists_*
+phase0_baseline/
+phase0_check/
+
+# Condor submission tarball -- 02_run_workflows.sh deletes and rebuilds it on
+# every submission, so one sitting in the tree is never the one that ships.
+BTVNanoCommissioning.tar.gz
+# Written by the site/dataset lookup helpers
+.sites_map.json
+test_my_samples_file_status.txt
+# Agent/editor state
+.claude/# NLORW model files are on EOS (SFbc-2D/scripts/prod/README_V5.md)
+/src/BTVNanoCommissioning/data/NLORW/
+submit_*.log

@@ -2,7 +2,10 @@ import os
 import sys
 import json
 import argparse
+import shutil
 import time
+import multiprocessing
+from concurrent.futures import ProcessPoolExecutor
 
 import numpy as np
 
@@ -11,6 +14,40 @@ from coffea.util import load, save
 from coffea import processor
 from coffea.nanoevents import PFNanoAODSchema
 from BTVNanoCommissioning.workflows import workflows
+
+
+def local_copy(sample_dict):
+    """xrdcp every remote input file to the job directory: one streaming read
+    instead of many small remote reads. A failed copy keeps the remote path.
+    Returns {local path: remote path}."""
+    import hashlib
+    import subprocess
+
+    names = {}
+    for key, files in sample_dict.items():
+        new = []
+        for path in files:
+            h = hashlib.md5(path.encode()).hexdigest()[:12]
+            dst = os.path.abspath(f"localcopy/{h}/{os.path.basename(path)}")
+            # BTV_LOCALCOPY_KEEP=1: several runner calls in one job share the copies
+            if path.startswith("root://") and not os.path.exists(dst):
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
+                cmd = ["xrdcp", "-f", "-s", path, dst + ".part"]
+                if subprocess.run(cmd).returncode == 0:
+                    os.rename(dst + ".part", dst)
+            if path.startswith("root://") and os.path.exists(dst):
+                names[dst] = path
+                path = dst
+            new.append(path)
+        sample_dict[key] = new
+    return names
+
+
+def restore_file_names(output, names):
+    """Write the remote names back into the per-dataset file bookkeeping."""
+    for d in output.values():
+        if isinstance(d, dict) and "fname" in d:
+            d["fname"] = processor.set_accumulator(names.get(f, f) for f in d["fname"])
 
 
 def validate(file):
@@ -22,8 +59,17 @@ def validate(file):
         return file
 
 
-def validate_dataset_structure(fileset, max_files_per_sample=None):
-    """Check dataset files and return a filtered fileset with only valid files."""
+def validate_dataset_structure(fileset, max_files_per_sample=None, open_retries=3):
+    """Check dataset files and return a filtered fileset with only valid files.
+
+    A file we failed to *read* tells us nothing about whether its structure is
+    compatible, so it is kept in the fileset -- processing has its own
+    --retries/--skipbadfiles for that -- rather than being silently dropped as
+    "incompatible", which used to turn a transient xrootd failure into an empty
+    output and a zero exit code. Only files we positively determined to be
+    malformed (missing branches, too few branches/events) are removed.
+    """
+    import time
     import uproot
     import logging
     from copy import deepcopy
@@ -46,6 +92,22 @@ def validate_dataset_structure(fileset, max_files_per_sample=None):
     optional_met_branches = ["MET_pt", "PuppiMET_pt", "PFMET_pt"]
 
     filtered_fileset = deepcopy(fileset)
+    unreadable = []
+
+    def open_events(filename):
+        """Open a file, retrying transient read failures (xrootd redirectors
+        routinely answer "No servers have the file" for a file that reads fine
+        seconds later). Returns None if it stays unreadable."""
+        for attempt in range(open_retries):
+            try:
+                return uproot.open(filename)["Events"]
+            except Exception as e:
+                if attempt == open_retries - 1:
+                    print(
+                        f"ERROR opening file after {open_retries} attempts: {filename}, {e}"
+                    )
+                    return None
+                time.sleep(2 * (attempt + 1))
 
     if max_files_per_sample is not None:
         print(
@@ -64,10 +126,14 @@ def validate_dataset_structure(fileset, max_files_per_sample=None):
 
         # Check each file in the sample
         for filename in files_to_check:
+            events = open_events(filename)
+            if events is None:
+                # Unreadable, not proven malformed: keep it and report it.
+                unreadable.append(filename)
+                if not fast_mode:
+                    valid_files.append(filename)
+                continue
             try:
-                # print(f"Validating file: {filename}")
-                file = uproot.open(filename)
-                events = file["Events"]
                 branches = set(events.keys())
 
                 # Check branch count
@@ -114,6 +180,7 @@ def validate_dataset_structure(fileset, max_files_per_sample=None):
                 # print(f"File validation successful: {filename}")
 
             except Exception as e:
+                # The file opened, so this is a genuine structural problem.
                 print(f"ERROR validating file: {filename}, {e}")
                 if fast_mode and filename in valid_files:
                     valid_files.remove(filename)
@@ -127,6 +194,11 @@ def validate_dataset_structure(fileset, max_files_per_sample=None):
             del filtered_fileset[sample_name]
 
     # Summary
+    if unreadable:
+        print(
+            f"WARNING: {len(unreadable)} file(s) could not be opened during validation "
+            "and were kept in the fileset (structure unknown)."
+        )
     if len(filtered_fileset) == 0:
         print("WARNING: All files in dataset failed validation!")
         return None
@@ -170,32 +242,18 @@ def make_tarfile(output_filename, source_dir, exclude_dirs=[]):
             ]  # Exclude specified directories
             for file in files:
                 file_path = os.path.join(root, file)
+                # Never nest the sandbox tarball inside itself: skip the file we
+                # are writing plus any stale copy at the top of source_dir.
+                # Matched by exact path, not a "*.tar.gz" glob -- that would
+                # also drop the JME Summer23/23BPix payloads under data/.
+                if os.path.abspath(file_path) in (
+                    os.path.abspath(output_filename),
+                    os.path.abspath(
+                        os.path.join(source_dir, "BTVNanoCommissioning.tar.gz")
+                    ),
+                ):
+                    continue
                 tar.add(file_path, arcname=os.path.relpath(file_path, source_dir))
-
-
-def get_condor_submitter_parser(parser):
-    parser.add_argument(
-        "--jobName",
-        help="Condor job name to make the job directory",
-        required=True,
-    )
-    parser.add_argument(
-        "--condorFileSize",
-        type=int,
-        default=50,
-        help="Number of files proceed per condor job",
-    )
-    parser.add_argument(
-        "--outputXrootdDir",
-        help="Output directory for xrootd files. Start with root://",
-        required=True,
-    )
-    parser.add_argument(
-        "--remoteRepo",
-        default=None,
-        help="If specified, access BTVNanoCommsioning from a remote tarball (downloaded via https), instead of from a transferred sandbox",
-    )
-    return parser
 
 
 def IO_parser(parser):
@@ -264,7 +322,40 @@ def config_parser(parser):
             "hooks for frag/decay reweights."
         ),
     )
+    parser.add_argument(
+        "--vjets-stitch",
+        dest="vjets_stitch",
+        default=None,
+        help="correctionlib json (vjets_fxfx_stitch) with the per-event LHE stitching "
+        "factor for the FxFx W/DY samples; off by default.",
+    )
+    parser.add_argument(
+        "--nlo-reweight",
+        dest="nlo_reweight",
+        action="store_true",
+        help="PRISM-PCA negative-weight reweighting of the FxFx W/DY samples (CMS AN-2026/042); off by default.",
+    )
+    parser.add_argument(
+        "--tagger-compare",
+        dest="tagger_compare",
+        action="store_true",
+        help="Book nominal-only logit(score) histograms of UParT, UParT-NoAdv, "
+        "PNet and DeepJet (where stored) for the tagger data/MC comparison",
+    )
     parser.add_argument("--isArray", action="store_true", help="Output root files")
+    parser.add_argument(
+        "--array-systs",
+        dest="array_systs",
+        default="none",
+        choices=["none", "weights", "shifts", "both"],
+        help="How much systematic content --isArray trees carry. 'none' "
+        "(default) writes the nominal shift only, with the central weight "
+        "components. 'weights' adds one weight_<variation> branch per weight "
+        "variation. 'shifts' also writes a tree per JES/JER shift, each under "
+        "its own directory. 'both' does both -- the two are independent axes "
+        "and are not crossed. Needs --isSyst set to something other than False "
+        "for either to have content. Default: %(default)s",
+    )
     parser.add_argument(
         "--noHist", action="store_true", help="Not output coffea histogram"
     )
@@ -378,6 +469,12 @@ def debug_parser(parser):
     )
     parser.add_argument("--skipbadfiles", action="store_true", help="Skip bad files.")
     parser.add_argument(
+        "--local-copy",
+        dest="local_copy",
+        action="store_true",
+        help="xrdcp the input files to the job directory first (faster for remote data files)",
+    )
+    parser.add_argument(
         "--only", type=str, default=None, help="Only process specific dataset or file"
     )
     parser.add_argument(
@@ -388,9 +485,9 @@ def debug_parser(parser):
     parser.add_argument(
         "--validate-files-per-sample",
         type=int,
-        default=None,
+        default=2,
         metavar="N",
-        help="Only inspect the first N files per sample during pre-flight validation (default: all).",
+        help="Only inspect the first N files per sample during pre-flight validation (default: 2). Use 0 or a negative value to check all files.",
     )
     parser.add_argument(
         "--limit",
@@ -420,7 +517,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
     if args.isSyst == "False":
         args.isSyst = False
-    os.environ["BTV_TTBAR_REWEIGHTS"] = args.ttbar_reweights
     print("Running with the following options:")
     print(args)
     ogoutput = args.output
@@ -504,6 +600,7 @@ if __name__ == "__main__":
         raise RuntimeError(
             f"No input files left to process after filtering {args.samplejson}."
         )
+    local_names = local_copy(sample_dict) if args.local_copy else {}
 
     # Scan if files can be opened
     if args.validate:
@@ -550,6 +647,12 @@ if __name__ == "__main__":
                         outf.write(line)
         sys.exit(0)
 
+    if args.nlo_reweight:
+        os.environ["BTV_NLO_REWEIGHT"] = "1"
+    if args.vjets_stitch:
+        # ponytail: env var reaches iterative/futures/condor_lxplus jobs, not dask/parsl workers
+        os.environ["BTV_VJETS_STITCH"] = args.vjets_stitch
+
     # load workflow
     proc_args = [
         args.year,
@@ -559,12 +662,19 @@ if __name__ == "__main__":
         args.isArray,
         args.noHist,
         args.chunk,
+        args.ttbar_reweights,
     ]
+    # workflows with several selections take the selection as keyword (the
+    # positional slot after chunksize is ttbar_reweights)
+    proc_kwargs = {}
     if args.selectionModifier != "":
-        proc_args.append(args.selectionModifier)
-
-    processor_instance = workflows[args.workflow](*proc_args)
-    setattr(processor_instance, "ttbar_reweights", args.ttbar_reweights)
+        proc_kwargs["selectionModifier"] = args.selectionModifier
+    processor_instance = workflows[args.workflow](*proc_args, **proc_kwargs)
+    # Set on the instance rather than threaded through every workflow's
+    # __init__: array_writer is the only consumer, and the instance is what
+    # gets pickled out to the dask/parsl/condor workers.
+    processor_instance.arraySysts = args.array_systs
+    processor_instance.taggerCompare = args.tagger_compare
 
     if args.skip_structure_validation:
         print("Skipping dataset structure validation (--skip-structure-validation).")
@@ -675,23 +785,32 @@ if __name__ == "__main__":
     # Execute
     if args.executor in ["futures", "iterative", "standalone_condor"]:
         if args.executor == "iterative":
-            _exec = processor.iterative_executor
+            _exec = processor.IterativeExecutor(workers=args.workers)
         else:
-            _exec = processor.futures_executor
+            # ProcessPoolExecutor's default "fork" start method forks worker
+            # processes after uproot/XRootD may already hold open remote-file
+            # connections in this process; the forked worker can then hang
+            # indefinitely closing/using that inherited state. "spawn" starts
+            # each worker as a fresh interpreter instead, avoiding that.
+            _exec = processor.FuturesExecutor(
+                pool=ProcessPoolExecutor(
+                    max_workers=args.workers,
+                    mp_context=multiprocessing.get_context("spawn"),
+                )
+            )
         if args.executor != "standalone_condor":
-            output = processor.run_uproot_job(
+            run = processor.Runner(
+                executor=_exec,
+                schema=PFNanoAODSchema,
+                skipbadfiles=args.skipbadfiles,
+                xrootdtimeout=900,
+                chunksize=args.chunk,
+                maxchunks=args.max,
+            )
+            output = run(
                 sample_dict,
                 treename="Events",
                 processor_instance=processor_instance,
-                executor=_exec,
-                executor_args={
-                    "skipbadfiles": args.skipbadfiles,
-                    "schema": PFNanoAODSchema,
-                    "workers": args.workers,
-                    "xrootdtimeout": 900,
-                },
-                chunksize=args.chunk,
-                maxchunks=args.max,
             )
 
         ## standalone condor from https://github.com/cms-btv-pog/BTVNanoCommissioning/blob/9edb9ed6bb0b28730b8de9e5aa1142ec4fdf74b7/condor/submitter.py
@@ -832,7 +951,6 @@ if __name__ == "__main__":
     elif "parsl" in args.executor:
         import parsl
         from parsl.providers import LocalProvider, CondorProvider, SlurmProvider
-        from parsl.channels import LocalChannel
         from parsl.config import Config
         from parsl.executors import HighThroughputExecutor
         from parsl.launchers import SrunLauncher
@@ -846,7 +964,6 @@ if __name__ == "__main__":
                         address=address_by_hostname(),
                         prefetch_capacity=0,
                         provider=SlurmProvider(
-                            channel=LocalChannel(script_dir="logs_parsl"),
                             launcher=SrunLauncher(),
                             mem_per_node=args.memory,
                             max_blocks=(args.scaleout) + 10,
@@ -858,6 +975,10 @@ if __name__ == "__main__":
                     )
                 ],
                 retries=args.retries,
+                # parsl removed Channels (and with them, per-provider
+                # script_dir=); the dataflow kernel now derives
+                # provider.script_dir from Config.run_dir automatically.
+                run_dir="logs_parsl",
             )
             if splitjobs:
                 htex_config = Config(
@@ -867,7 +988,6 @@ if __name__ == "__main__":
                             address=address_by_hostname(),
                             prefetch_capacity=0,
                             provider=SlurmProvider(
-                                channel=LocalChannel(script_dir="logs_parsl"),
                                 launcher=SrunLauncher(),
                                 mem_per_node=args.memory,
                                 max_blocks=(args.scaleout) + 10,
@@ -882,7 +1002,6 @@ if __name__ == "__main__":
                             address=address_by_hostname(),
                             prefetch_capacity=0,
                             provider=SlurmProvider(
-                                channel=LocalChannel(script_dir="logs_parsl"),
                                 launcher=SrunLauncher(),
                                 mem_per_node=args.memory,
                                 max_blocks=(args.scaleout) + 10,
@@ -895,6 +1014,10 @@ if __name__ == "__main__":
                     ],
                     retries=args.retries,
                     retry_handler=retry_handler,
+                    # parsl removed Channels (and with them, per-provider
+                    # script_dir=); the dataflow kernel now derives
+                    # provider.script_dir from Config.run_dir automatically.
+                    run_dir="logs_parsl",
                 )
         elif "condor" in args.executor:
             if "naf_lite" in args.executor:
@@ -1031,36 +1154,26 @@ if __name__ == "__main__":
 
         dfk = parsl.load(htex_config)
         if not splitjobs:
-            output = processor.run_uproot_job(
-                sample_dict,
-                treename="Events",
-                processor_instance=processor_instance,
-                executor=processor.parsl_executor,
-                executor_args={
-                    "skipbadfiles": args.skipbadfiles,
-                    "schema": PFNanoAODSchema,
-                    "config": None,
-                },
-                chunksize=args.chunk,
-                maxchunks=args.max,
-            )
+            _exec = processor.ParslExecutor(config=None)
         else:
-            output = processor.run_uproot_job(
-                sample_dict,
-                treename="Events",
-                processor_instance=processor_instance,
-                executor=processor.parsl_executor,
-                executor_args={
-                    "skipbadfiles": args.skipbadfiles,
-                    "schema": PFNanoAODSchema,
-                    "merging": True,
-                    "merges_executors": ["merge"],
-                    "jobs_executors": ["run"],
-                    "config": None,
-                },
-                chunksize=args.chunk,
-                maxchunks=args.max,
+            _exec = processor.ParslExecutor(
+                merging=True,
+                merges_executors=["merge"],
+                jobs_executors=["run"],
+                config=None,
             )
+        run = processor.Runner(
+            executor=_exec,
+            schema=PFNanoAODSchema,
+            skipbadfiles=args.skipbadfiles,
+            chunksize=args.chunk,
+            maxchunks=args.max,
+        )
+        output = run(
+            sample_dict,
+            treename="Events",
+            processor_instance=processor_instance,
+        )
     elif "dask" in args.executor:
         from dask_jobqueue import SLURMCluster, HTCondorCluster
         from distributed import Client
@@ -1149,19 +1262,18 @@ if __name__ == "__main__":
             client.wait_for_workers(1)
         with performance_report(filename="dask-report.html"):
             if args.executor != "dask/lxplus":
-                output = processor.run_uproot_job(
+                _exec = processor.DaskExecutor(client=client, retries=args.retries)
+                run = processor.Runner(
+                    executor=_exec,
+                    schema=PFNanoAODSchema,
+                    skipbadfiles=args.skipbadfiles,
+                    chunksize=args.chunk,
+                    maxchunks=args.max,
+                )
+                output = run(
                     sample_dict,
                     treename="Events",
                     processor_instance=processor_instance,
-                    executor=processor.dask_executor,
-                    executor_args={
-                        "client": client,
-                        "skipbadfiles": args.skipbadfiles,
-                        "schema": PFNanoAODSchema,
-                        "retries": args.retries,
-                    },
-                    chunksize=args.chunk,
-                    maxchunks=args.max,
                 )
 
             else:
@@ -1186,19 +1298,20 @@ if __name__ == "__main__":
                             and sindex > int(args.index.split(",")[2])
                         ):
                             break
-                        output = processor.run_uproot_job(
+                        _exec = processor.DaskExecutor(
+                            client=client, retries=args.retries
+                        )
+                        run = processor.Runner(
+                            executor=_exec,
+                            schema=PFNanoAODSchema,
+                            skipbadfiles=args.skipbadfiles,
+                            chunksize=args.chunk,
+                            maxchunks=args.max,
+                        )
+                        output = run(
                             splitted,
                             treename="Events",
                             processor_instance=processor_instance,
-                            executor=processor.dask_executor,
-                            executor_args={
-                                "client": client,
-                                "skipbadfiles": args.skipbadfiles,
-                                "schema": PFNanoAODSchema,
-                                "retries": args.retries,
-                            },
-                            chunksize=args.chunk,
-                            maxchunks=args.max,
                         )
                         if args.noHist == False:
                             save(
@@ -1207,6 +1320,11 @@ if __name__ == "__main__":
                                     ".coffea", f"_{sindex}_{findex}.coffea"
                                 ),
                             )
+    if local_names:
+        restore_file_names(output, local_names)
+        if os.environ.get("BTV_LOCALCOPY_KEEP") != "1":
+            for f in local_names:
+                shutil.rmtree(os.path.dirname(f))
     if not "lxplus" in args.executor:
         if args.noHist == False:
             save(output, coffeaoutput)

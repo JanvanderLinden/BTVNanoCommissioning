@@ -40,11 +40,7 @@ def select_lepton(events, channel, campaign, iso_mode="tight"):
         tight = (
             (events.Muon.pt > 30)
             & (abs(events.Muon.eta) < eta_cut)
-            & (
-                mu_promptmvaid(events, campaign)
-                if use_promptmva
-                else mu_idiso(events, campaign)
-            )
+            & (mu_promptmvaid(events) if use_promptmva else mu_idiso(events))
         )
         if iso_mode == "tight":
             mask = tight
@@ -414,6 +410,7 @@ class NanoProcessor(processor.ProcessorABC):
         isArray=False,
         noHist=False,
         chunksize=10000,
+        ttbar_reweights="none",
         selectionModifier="",  # "tt_semilep_mu" or "tt_semilep_el"
         tag_tagger="UParTAK4",
     ):
@@ -425,6 +422,7 @@ class NanoProcessor(processor.ProcessorABC):
         self.noHist = noHist
         self.lumiMask = load_lumi(self._campaign)
         self.chunksize = chunksize
+        self.ttbar_reweights = ttbar_reweights
         if selectionModifier not in ["tt_semilep_el", "tt_semilep_mu"]:
             raise ValueError(f"Invalid selectionModifier: {selectionModifier}")
         self.channel = "el" if (selectionModifier == "tt_semilep_el") else "mu"
@@ -851,7 +849,12 @@ class NanoProcessor(processor.ProcessorABC):
 
     def process(self, events):
         events = missing_branch(events)
-        sumws = reweighting(events, self.isSyst)
+        sumws = reweighting(
+            events,
+            self.isSyst,
+            ttbar_reweights=self.ttbar_reweights,
+            campaign=self._campaign,
+        )
         vetoed_events, shifts = common_shifts(self, events)
 
         return processor.accumulate(
@@ -880,26 +883,8 @@ class NanoProcessor(processor.ProcessorABC):
 
         if shift_name is None:
             output["sumw"] = sumws["sumw"]
-            if not isRealData and self.isSyst:
-                if "LHEPdfWeight" in events.fields:
-                    output["PDF_sumwUp"] = sumws["PDF_sumwUp"]
-                    output["PDF_sumwDown"] = sumws["PDF_sumwDown"]
-                    output["aS_sumwUp"] = sumws["aS_sumwUp"]
-                    output["aS_sumwDown"] = sumws["aS_sumwDown"]
-                    output["PDFaS_sumwUp"] = sumws["PDFaS_sumwUp"]
-                    output["PDFaS_sumwDown"] = sumws["PDFaS_sumwDown"]
-                if "LHEScaleWeight" in events.fields:
-                    print("I AM HERE")
-                    output["muR_sumwUp"] = sumws["muR_sumwUp"]
-                    output["muR_sumwDown"] = sumws["muR_sumwDown"]
-                    output["muF_sumwUp"] = sumws["muF_sumwUp"]
-                    output["muF_sumwDown"] = sumws["muF_sumwDown"]
-                if "PSWeight" in events.fields:
-                    if len(events.PSWeight[0]) == 4:
-                        output["ISR_sumwUp"] = sumws["ISR_sumwUp"]
-                        output["ISR_sumwDown"] = sumws["ISR_sumwDown"]
-                        output["FSR_sumwUp"] = sumws["FSR_sumwUp"]
-                        output["FSR_sumwDown"] = sumws["FSR_sumwDown"]
+            # one sum per generator-level variation, see correction.reweighting
+            output.update({k: v for k, v in sumws.items() if k.startswith("sumw_")})
 
         # -------------------- Common preselection --------------------
         req_lumi = np.ones(len(events), dtype=bool)
@@ -933,11 +918,7 @@ class NanoProcessor(processor.ProcessorABC):
         mu_loose = (
             (events.Muon.pt > 15)
             & (abs(events.Muon.eta) < eta_cut)
-            & (
-                mu_promptmvaid(events, self._campaign)
-                if use_promptmva
-                else mu_idiso(events, self._campaign)
-            )
+            & (mu_promptmvaid(events) if use_promptmva else mu_idiso(events))
         )
         el_loose = (
             (events.Electron.pt > 15)
@@ -1371,7 +1352,7 @@ class NanoProcessor(processor.ProcessorABC):
                         pr,
                         self.SF_map,
                         self.isSyst,
-                        ttbar_reweights=getattr(self, "ttbar_reweights", "none"),
+                        ttbar_reweights=self.ttbar_reweights,
                         campaign=self._campaign,
                     )
                     systematics = (

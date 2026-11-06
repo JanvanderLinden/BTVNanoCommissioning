@@ -145,13 +145,14 @@ def get_hadron_mass(hadron_pids):
 
 
 def cumsum(array):
-    layout = array.layout
-    layout.content
-    scan = ak.Array(
-        ak.layout.ListOffsetArray64(
-            layout.offsets, ak.layout.NumpyArray(np.cumsum(layout.content))
-        )
-    )
+    """Per-sublist (axis=1) cumulative sum, resetting at each event -- e.g. for
+    array=[[1,2],[3]] returns [[1,3],[3]]. Implemented via a flatten/cumsum/
+    unflatten round trip rather than layout surgery, so it works unchanged
+    under both awkward 1.x and 2.x (the flatten+unflatten API is unchanged
+    across the version bump; ak.layout.ListOffsetArray64/NumpyArray are not)."""
+    counts = ak.num(array, axis=1)
+    flat_cumsum = np.cumsum(ak.to_numpy(ak.flatten(array, axis=1)))
+    scan = ak.unflatten(flat_cumsum, counts)
     cumsum_array = ak.fill_none(scan - ak.firsts(scan) + ak.firsts(array), [], axis=0)
     return cumsum_array
 

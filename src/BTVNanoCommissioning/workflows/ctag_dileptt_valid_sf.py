@@ -39,6 +39,7 @@ class NanoProcessor(processor.ProcessorABC):
         isArray=False,
         noHist=False,
         chunksize=75000,
+        ttbar_reweights="none",
         selectionModifier="DilepTTEM",
     ):
         self._year = year
@@ -49,6 +50,7 @@ class NanoProcessor(processor.ProcessorABC):
         self.noHist = noHist
         self.lumiMask = load_lumi(self._campaign)
         self.chunksize = chunksize
+        self.ttbar_reweights = ttbar_reweights
         self.selMod = selectionModifier
         # Load corrections
         self.SF_map = load_SF(self._year, self._campaign)
@@ -59,7 +61,12 @@ class NanoProcessor(processor.ProcessorABC):
 
     def process(self, events):
         events = missing_branch(events)
-        sumws = reweighting(events, self.isSyst)
+        sumws = reweighting(
+            events,
+            self.isSyst,
+            ttbar_reweights=self.ttbar_reweights,
+            campaign=self._campaign,
+        )
         vetoed_events, shifts = common_shifts(self, events)
 
         return processor.accumulate(
@@ -89,9 +96,7 @@ class NanoProcessor(processor.ProcessorABC):
         # Lepton selections
         if self.selMod == "dilepttM":
             # dilepton selections
-            iso_muon = events.Muon[
-                (events.Muon.pt > 12) & mu_idiso(events, self._campaign)
-            ]
+            iso_muon = events.Muon[(events.Muon.pt > 12) & mu_idiso(events)]
             iso_lep = ak.pad_none(iso_muon, 2)
             req_lep = (ak.count(iso_lep.pt, axis=1) == 2) & (iso_lep[:, 0].pt > 20)
             # veto other flavors
@@ -107,9 +112,7 @@ class NanoProcessor(processor.ProcessorABC):
             iso_lep = ak.pad_none(iso_ele, 2)
             req_lep = (ak.count(iso_lep.pt, axis=1) == 2) & (iso_lep[:, 0].pt > 27)
             # veto other flavors
-            dilep_mu = events.Muon[
-                (events.Muon.pt > 12) & mu_idiso(events, self._campaign)
-            ]
+            dilep_mu = events.Muon[(events.Muon.pt > 12) & mu_idiso(events)]
             req_dilepveto = ak.count(dilep_mu.pt, axis=1) == 0
 
         # veto Z events
@@ -127,7 +130,7 @@ class NanoProcessor(processor.ProcessorABC):
         req_jets = ak.count(event_jet.pt, axis=1) >= 2
 
         # Soft Muon cuts
-        soft_muon = events.Muon[softmu_mask(events, self._campaign)]
+        soft_muon = events.Muon[softmu_mask(events)]
         req_softmu = ak.count(soft_muon.pt, axis=1) >= 1
 
         # Muon jet cuts
@@ -203,25 +206,8 @@ class NanoProcessor(processor.ProcessorABC):
 
         if shift_name is None:
             output["sumw"] = sumws["sumw"]
-            if not isRealData and self.isSyst:
-                if "LHEPdfWeight" in events.fields:
-                    output["PDF_sumwUp"] = sumws["PDF_sumwUp"]
-                    output["PDF_sumwDown"] = sumws["PDF_sumwDown"]
-                    output["aS_sumwUp"] = sumws["aS_sumwUp"]
-                    output["aS_sumwDown"] = sumws["aS_sumwDown"]
-                    output["PDFaS_sumwUp"] = sumws["PDFaS_sumwUp"]
-                    output["PDFaS_sumwDown"] = sumws["PDFaS_sumwDown"]
-                if "LHEScaleWeight" in events.fields:
-                    output["muR_sumwUp"] = sumws["muR_sumwUp"]
-                    output["muR_sumwDown"] = sumws["muR_sumwDown"]
-                    output["muF_sumwUp"] = sumws["muF_sumwUp"]
-                    output["muF_sumwDown"] = sumws["muF_sumwDown"]
-                if "PSWeight" in events.fields:
-                    if len(events.PSWeight[0]) == 4:
-                        output["ISR_sumwUp"] = sumws["ISR_sumwUp"]
-                        output["ISR_sumwDown"] = sumws["ISR_sumwDown"]
-                        output["FSR_sumwUp"] = sumws["FSR_sumwUp"]
-                        output["FSR_sumwDown"] = sumws["FSR_sumwDown"]
+            # one sum per generator-level variation, see correction.reweighting
+            output.update({k: v for k, v in sumws.items() if k.startswith("sumw_")})
 
         # only dump for nominal case
         if shift_name is None:
@@ -249,24 +235,29 @@ class NanoProcessor(processor.ProcessorABC):
         pruned_ev = events[event_level]
         pruned_ev["SelJet"] = event_jet[event_level]
 
+        sdilep = shlep[:, 0] + shlep[:, 1]
+        # a plain (behavior-less) record, not sdilep itself -- storing sdilep's
+        # own vector-behaved record directly, plus its derived pt/eta/phi/mass
+        # as separate literal fields, would leave the record with both cartesian
+        # (x,y from the sum) and polar fields at once, which awkward2's
+        # CandidateArray validation rejects on any later access (e.g. histogramming)
+        dilep_kin = ak.zip(
+            {"pt": sdilep.pt, "eta": sdilep.eta, "phi": sdilep.phi, "mass": sdilep.mass}
+        )
         if self.selMod == "dilepttM":
             pruned_ev["SelMuon"] = shlep[:, :2]
             pruned_ev["hl"] = shlep[:, 0]
             pruned_ev["sl"] = shlep[:, 1]
-            pruned_ev["dilep"] = shlep[:, 0] + shlep[:, 1]
+            pruned_ev["dilep"] = dilep_kin
         if self.selMod == "dilepttE":
             pruned_ev["SelElectron"] = shlep[:, :2]
             pruned_ev["hl"] = shlep[:, 0]
             pruned_ev["sl"] = shlep[:, 1]
-            pruned_ev["dilep"] = shlep[:, 0] + shlep[:, 1]
+            pruned_ev["dilep"] = dilep_kin
 
         pruned_ev["MuonJet"] = mu_jet[event_level][:, 0]
         pruned_ev["SoftMuon"] = soft_muon[event_level][:, 0]
         pruned_ev["njet"] = ak.count(event_jet[event_level].pt, axis=1)
-        pruned_ev["dilep", "pt"] = pruned_ev.dilep.pt
-        pruned_ev["dilep", "eta"] = pruned_ev.dilep.eta
-        pruned_ev["dilep", "phi"] = pruned_ev.dilep.phi
-        pruned_ev["dilep", "mass"] = pruned_ev.dilep.mass
         if "PFCands" in events.fields:
             pruned_ev.PFCands = PFCand_link(events, event_level, jetindx)
 
@@ -281,7 +272,7 @@ class NanoProcessor(processor.ProcessorABC):
             pruned_ev,
             self.SF_map,
             self.isSyst,
-            ttbar_reweights=getattr(self, "ttbar_reweights", "none"),
+            ttbar_reweights=self.ttbar_reweights,
             campaign=self._campaign,
         )
         # Configure systematics

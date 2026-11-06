@@ -4,15 +4,19 @@ from .axes.qgtag import axes as qgtag_axes
 from .histograms.common import get_histograms as common_hists
 from .histograms.ctag_ttdilep import get_histograms as ctag_ttdilep_hists
 from .histograms.ctag_ttsemilep import get_histograms as ctag_ttsemilep_hists
+from .histograms.dijet_2D import get_histograms as dijet_2D_hists
+from .histograms.dy_2D import get_histograms as dy_2D_hists
 from .histograms.dy import get_histograms as dy_hists
 from .histograms.dy_sfl import get_histograms as dy_sfl_hists
 from .histograms.example import get_histograms as example_hists
 from .histograms.fourvec import get_histograms as fourvec_hists
 from .histograms.ttdilep_kin import get_histograms as ttdilep_kin_hists
 from .histograms.ttdilep import get_histograms as ttdilep_hists
+from .histograms.ttsemilep_2D import get_histograms as ttsemilep_2D_hists
 from .histograms.ttsemilep import get_histograms as ttsemilep_hists
 from .histograms.qcd import get_histograms as qcd_hists
 from .histograms.qcd_smu import get_histograms as qcd_smu_hists
+from .histograms.sf2d import get_histograms as sf2d_hists
 from .histograms.validation import get_histograms as validation_hists
 from .histograms.wc import get_histograms as wc_hists
 from .histograms.qgtag import get_histograms as qgtag_hists
@@ -51,11 +55,15 @@ def get_hist_collections(axes: dict, hist_collections: list, **kwargs):
         "QCD_smu": qcd_smu_hists,
         "ctag_ttdilep": ctag_ttdilep_hists,
         "ctag_ttsemilep": ctag_ttsemilep_hists,
+        "dijet_2D": dijet_2D_hists,
+        "DY_2D": dy_2D_hists,
         "DY": dy_hists,
         "DY_sfl": dy_sfl_hists,
         "ttdilep_kin": ttdilep_kin_hists,
         "ttdilep": ttdilep_hists,
+        "ttsemilep_2D": ttsemilep_2D_hists,
         "ttsemilep": ttsemilep_hists,
+        "SF2D": sf2d_hists,
         "validation": validation_hists,
         "Wc": wc_hists,
         "qgtag": qgtag_hists,

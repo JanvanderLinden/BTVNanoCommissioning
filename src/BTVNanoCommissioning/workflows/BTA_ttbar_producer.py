@@ -24,10 +24,12 @@ class NanoProcessor(processor.ProcessorABC):
         isArray=True,
         noHist=False,
         chunksize=75000,
+        ttbar_reweights="none",
     ):
         self._year = year
         self._campaign = campaign
         self.chunksize = chunksize
+        self.ttbar_reweights = ttbar_reweights
         self.syst = isSyst
         self.name = name
         self.SF_map = load_SF(self._year, self._campaign)
@@ -573,12 +575,29 @@ class NanoProcessor(processor.ProcessorABC):
             output_root = {}
             for bname in output.keys():
                 if not output[bname].fields:
-                    output_root[bname] = ak.packed(ak.without_parameters(output[bname]))
+                    # uproot4 auto-added an "n{branch}" count branch for a
+                    # plain (non-record) jagged array; uproot5 doesn't, so
+                    # write it explicitly to preserve the old ROOT schema.
+                    if output[bname].ndim > 1:
+                        output_root[f"n{bname}"] = ak.num(output[bname], axis=1)
+                    output_root[bname] = ak.to_packed(
+                        ak.without_parameters(output[bname])
+                    )
                 else:
-                    b_nest = {}
+                    # Write each sub-field as its own flat "{bname}_{field}"
+                    # branch (plus an explicit "n{bname}" count branch, only
+                    # for genuinely jagged collections) instead of ak.zip-ing
+                    # them into one nested record. uproot5 (unlike uproot4)
+                    # writes a nested record as genuinely nested dotted
+                    # branches ("Jet.pT") rather than auto-flattening it --
+                    # this preserves the original flat ROOT schema so
+                    # downstream readers don't need to change.
+                    if output[bname].ndim > 1:
+                        output_root[f"n{bname}"] = ak.num(output[bname], axis=1)
                     for n in output[bname].fields:
-                        b_nest[n] = ak.packed(ak.without_parameters(output[bname][n]))
-                    output_root[bname] = ak.zip(b_nest)
+                        output_root[f"{bname}_{n}"] = ak.to_packed(
+                            ak.without_parameters(output[bname][n])
+                        )
             fout["btagana/ttree"] = output_root
             if isRealData:
                 fout["sumw"] = {"total_events": ak.Array([len(events)])}

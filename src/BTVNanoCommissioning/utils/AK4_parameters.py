@@ -1,27 +1,4 @@
 correction_config = {
-    "Rereco17_94X": {
-        "default": {
-            "DC": "Cert_314472-325175_13TeV_17SeptEarlyReReco2018ABC_PromptEraD_Collisions18_JSON.txt",
-            "LUM": "94XPUwei_corrections.pkl.gz",
-            "JME": "jec_compiled.pkl.gz",
-            "BTV": {
-                "DeepCSVB": "DeepCSV_94XSF_V5_B_F.csv",
-                "DeepCSVC": "DeepCSV_ctagSF_MiniAOD94X_2017_pTincl_v3_2_interp.root",
-                "DeepJetB": "DeepFlavour_94XSF_V4_B_F.csv",
-                "DeepJetC": "DeepJet_ctagSF_MiniAOD94X_2017_pTincl_v3_2_interp.root",
-            },
-            "EGM": {
-                "ele_Trig TrigSF": "Ele32_L1DoubleEG_TrigSF_vhcc.histo.root",
-                "ele_ID EGamma_SF2D": "ElectronIDSF_94X_MVA80WP.histo.root",
-                "ele_Rereco EGamma_SF2D": "ElectronRecoSF_94X.histo.root",
-            },
-            "MUO": {
-                "mu_ID NUM_TightID_DEN_genTracks_pt_abseta": "RunBCDEF_MuIDSF.histo.root",
-                "mu_ID_low NUM_TightID_DEN_genTracks_pt_abseta": "RunBCDEF_MuIDSF_lowpT.histo.root",
-                "mu_Iso NUM_TightRelIso_DEN_TightIDandIPCut_pt_abseta": "RunBCDEF_MuISOSF.histo.root",
-            },
-        },
-    },
     "2016preVFP-UL": {
         "default": {
             "DC": "Cert_271036-284044_13TeV_Legacy2016_Collisions16_JSON.txt",
@@ -157,6 +134,14 @@ correction_config = {
                 "electronSS": "Run2-2017-UL-NanoAODv15",
                 "jetveto": "Run2-2017-UL-NanoAODv15",
             },
+        },  # obj_eff only: pileup weights and the IsoMu27 trigger SF (other workflows keep "default")
+        "ObjEffM": {
+            "LUM": "puWeights.json.gz",
+            "MUO": {
+                "mu_ID": "NUM_TightID_DEN_TrackerMuons",
+                "mu_Iso": "NUM_TightRelIso_DEN_TightIDandIPCut",
+                "mu_Trig": "NUM_IsoMu27_DEN_CutBasedIdTight_and_PFIsoTight",
+            },
         },
         "tt_semilep_mu": {
             "MUO": {
@@ -171,6 +156,7 @@ correction_config = {
                 "ele_ID 2017 UL-Electron-ID-SF": "wp80iso",
             },
         },
+        "ObjEffE": {"LUM": "puWeights.json.gz"},
     },
     "2018-UL": {
         "default": {
@@ -221,14 +207,6 @@ correction_config = {
             },
         },
     },
-    "Winter22Run3": {
-        "default": {
-            "DC": "Cert_Collisions2022_355100_357900_Golden.json",
-            "LUM": "puweight_Winter22Run3.histo.root",
-            "JME": "jec_compiled.pkl.gz",
-            "jetveto": {"Run2022CD jetvetomap": "Winter22Run3_RunCD_v1.histo.root"},
-        },
-    },
     "Summer22": {
         "default": {
             "DC": "Cert_Collisions2022_355100_362760_Golden.json",
@@ -257,6 +235,64 @@ correction_config = {
                 "Scale",
                 "SmearAndSyst",
             ],
+        },
+        "DYM_2D": {
+            "MUO": {
+                "mu_ID": "NUM_TightID_DEN_TrackerMuons",
+                "mu_Iso": "NUM_TightPFIso_DEN_TightID",
+                # TODO: need to derive double lepton trigger SFs
+                # "mu_Trig": "",
+            },
+        },
+        "DYE_2D": {
+            "EGM": {
+                "ele_ID 2022Re-recoBCD Electron-ID-SF": "wp80iso",
+                "ele_Reco 2022Re-recoBCD Electron-ID-SF": "",
+                # TODO: need to derive double lepton trigger SFs
+                # "ele_Trig 2022Re-recoBCD Electron-HLT-SF": "",
+            },
+        },
+        "WcM_2D": {
+            "MUO": {
+                "mu_ID": "NUM_TightID_DEN_TrackerMuons",
+                "mu_Iso": "NUM_TightPFIso_DEN_TightID",
+                "mu_Trig": "NUM_IsoMu24_DEN_CutBasedIdTight_and_PFIsoTight",
+            },
+        },
+        "WcE_2D": {
+            "EGM": {
+                "ele_ID 2022Re-recoBCD Electron-ID-SF": "wp80iso",
+                "ele_Reco 2022Re-recoBCD Electron-ID-SF": "",
+                "ele_Trig 2022Re-recoBCD Electron-HLT-SF": "HLT_SF_Ele30_MVAiso80ID",
+            },
+        },
+        "ttdilep_sf_2D": {
+            "MUO": {
+                "mu_ID": "NUM_TightID_DEN_TrackerMuons",
+                "mu_Iso": "NUM_TightPFIso_DEN_TightID",
+                "mu_Trig": "NUM_IsoMu24_DEN_CutBasedIdTight_and_PFIsoTight",
+            },
+            "EGM": {
+                "ele_ID 2022Re-recoBCD Electron-ID-SF": "wp80iso",
+                "ele_Reco 2022Re-recoBCD Electron-ID-SF": "",
+                "ele_Trig 2022Re-recoBCD Electron-HLT-SF": "HLT_SF_Ele30_MVAiso80ID",
+            },
+        },
+        "semittM_2D": {
+            "MUO": {
+                "mu_ID": "NUM_TightID_DEN_TrackerMuons",
+                "mu_Iso": "NUM_TightPFIso_DEN_TightID",
+                "mu_Trig": "NUM_IsoMu24_DEN_CutBasedIdTight_and_PFIsoTight",
+            },
+            # # "BTV": {"ctag": "ctagging.json.gz"},
+        },
+        "semittE_2D": {
+            "EGM": {
+                "ele_ID 2022Re-recoBCD Electron-ID-SF": "wp80iso",
+                "ele_Reco 2022Re-recoBCD Electron-ID-SF": "",
+                "ele_Trig 2022Re-recoBCD Electron-HLT-SF": "HLT_SF_Ele30_MVAiso80ID",
+            },
+            # # "BTV": {"ctag": "ctagging.json.gz"},
         },
     },
     "Summer22EE": {
@@ -292,6 +328,64 @@ correction_config = {
                 "SmearAndSyst",
             ],
         },
+        "DYM_2D": {
+            "MUO": {
+                "mu_ID": "NUM_TightID_DEN_TrackerMuons",
+                "mu_Iso": "NUM_TightPFIso_DEN_TightID",
+                # TODO: need to derive double lepton trigger SFs
+                # "mu_Trig": "",
+            },
+        },
+        "DYE_2D": {
+            "EGM": {
+                "ele_ID 2022Re-recoE+PromptFG Electron-ID-SF": "wp80iso",
+                "ele_Reco 2022Re-recoE+PromptFG Electron-ID-SF": "",
+                # TODO: need to derive double lepton trigger SFs
+                # "ele_Trig 2022Re-recoE+PromptFG Electron-HLT-SF": "",
+            },
+        },
+        "WcM_2D": {
+            "MUO": {
+                "mu_ID": "NUM_TightID_DEN_TrackerMuons",
+                "mu_Iso": "NUM_TightPFIso_DEN_TightID",
+                "mu_Trig": "NUM_IsoMu24_DEN_CutBasedIdTight_and_PFIsoTight",
+            },
+        },
+        "WcE_2D": {
+            "EGM": {
+                "ele_ID 2022Re-recoE+PromptFG Electron-ID-SF": "wp80iso",
+                "ele_Reco 2022Re-recoE+PromptFG Electron-ID-SF": "",
+                "ele_Trig 2022Re-recoE+PromptFG Electron-HLT-SF": "HLT_SF_Ele30_MVAiso80ID",
+            },
+        },
+        "ttdilep_sf_2D": {
+            "MUO": {
+                "mu_ID": "NUM_TightID_DEN_TrackerMuons",
+                "mu_Iso": "NUM_TightPFIso_DEN_TightID",
+                "mu_Trig": "NUM_IsoMu24_DEN_CutBasedIdTight_and_PFIsoTight",
+            },
+            "EGM": {
+                "ele_ID 2022Re-recoE+PromptFG Electron-ID-SF": "wp80iso",
+                "ele_Reco 2022Re-recoE+PromptFG Electron-ID-SF": "",
+                "ele_Trig 2022Re-recoE+PromptFG Electron-HLT-SF": "HLT_SF_Ele30_MVAiso80ID",
+            },
+        },
+        "semittM_2D": {
+            "MUO": {
+                "mu_ID": "NUM_TightID_DEN_TrackerMuons",
+                "mu_Iso": "NUM_TightPFIso_DEN_TightID",
+                "mu_Trig": "NUM_IsoMu24_DEN_CutBasedIdTight_and_PFIsoTight",
+            },
+            # # "BTV": {"ctag": "ctagging.json.gz"},
+        },
+        "semittE_2D": {
+            "EGM": {
+                "ele_ID 2022Re-recoE+PromptFG Electron-ID-SF": "wp80iso",
+                "ele_Reco 2022Re-recoE+PromptFG Electron-ID-SF": "",
+                "ele_Trig 2022Re-recoE+PromptFG Electron-HLT-SF": "HLT_SF_Ele30_MVAiso80ID",
+            },
+            # # "BTV": {"ctag": "ctagging.json.gz"},
+        },
     },
     "Summer23": {
         "default": {
@@ -322,6 +416,64 @@ correction_config = {
                 "Scale",
                 "SmearAndSyst",
             ],
+        },
+        "DYM_2D": {
+            "MUO": {
+                "mu_ID": "NUM_TightID_DEN_TrackerMuons",
+                "mu_Iso": "NUM_TightPFIso_DEN_TightID",
+                # TODO: need to derive double lepton trigger SFs
+                # "mu_Trig": "",
+            },
+        },
+        "DYE_2D": {
+            "EGM": {
+                "ele_ID 2023PromptC Electron-ID-SF": "wp80iso",
+                "ele_Reco 2023PromptC Electron-ID-SF": "",
+                # TODO: need to derive double lepton trigger SFs
+                # "ele_Trig 2023PromptC Electron-HLT-SF": "",
+            },
+        },
+        "WcM_2D": {
+            "MUO": {
+                "mu_ID": "NUM_TightID_DEN_TrackerMuons",
+                "mu_Iso": "NUM_TightPFIso_DEN_TightID",
+                "mu_Trig": "NUM_IsoMu24_DEN_CutBasedIdTight_and_PFIsoTight",
+            },
+        },
+        "WcE_2D": {
+            "EGM": {
+                "ele_ID 2023PromptC Electron-ID-SF": "wp80iso",
+                "ele_Reco 2023PromptC Electron-ID-SF": "",
+                "ele_Trig 2023PromptC Electron-HLT-SF": "HLT_SF_Ele30_MVAiso80ID",
+            },
+        },
+        "ttdilep_sf_2D": {
+            "MUO": {
+                "mu_ID": "NUM_TightID_DEN_TrackerMuons",
+                "mu_Iso": "NUM_TightPFIso_DEN_TightID",
+                "mu_Trig": "NUM_IsoMu24_DEN_CutBasedIdTight_and_PFIsoTight",
+            },
+            "EGM": {
+                "ele_ID 2023PromptC Electron-ID-SF": "wp80iso",
+                "ele_Reco 2023PromptC Electron-ID-SF": "",
+                "ele_Trig 2023PromptC Electron-HLT-SF": "HLT_SF_Ele30_MVAiso80ID",
+            },
+        },
+        "semittM_2D": {
+            "MUO": {
+                "mu_ID": "NUM_TightID_DEN_TrackerMuons",
+                "mu_Iso": "NUM_TightPFIso_DEN_TightID",
+                "mu_Trig": "NUM_IsoMu24_DEN_CutBasedIdTight_and_PFIsoTight",
+            },
+            # # "BTV": {"ctag": "ctagging.json.gz"},
+        },
+        "semittE_2D": {
+            "EGM": {
+                "ele_ID 2023PromptC Electron-ID-SF": "wp80iso",
+                "ele_Reco 2023PromptC Electron-ID-SF": "",
+                "ele_Trig 2023PromptC Electron-HLT-SF": "HLT_SF_Ele30_MVAiso80ID",
+            },
+            # # "BTV": {"ctag": "ctagging.json.gz"},
         },
     },
     "Summer23BPix": {
@@ -354,11 +506,70 @@ correction_config = {
                 "SmearAndSyst",
             ],
         },
+        "DYM_2D": {
+            "MUO": {
+                "mu_ID": "NUM_TightID_DEN_TrackerMuons",
+                "mu_Iso": "NUM_TightPFIso_DEN_TightID",
+                # TODO: need to derive double lepton trigger SFs
+                # "mu_Trig": "",
+            },
+        },
+        "DYE_2D": {
+            "EGM": {
+                "ele_ID 2023PromptD Electron-ID-SF": "wp80iso",
+                "ele_Reco 2023PromptD Electron-ID-SF": "",
+                # TODO: need to derive double lepton trigger SFs
+                # "ele_Trig 2023PromptD Electron-HLT-SF": "",
+            },
+        },
+        "WcM_2D": {
+            "MUO": {
+                "mu_ID": "NUM_TightID_DEN_TrackerMuons",
+                "mu_Iso": "NUM_TightPFIso_DEN_TightID",
+                "mu_Trig": "NUM_IsoMu24_DEN_CutBasedIdTight_and_PFIsoTight",
+            },
+        },
+        "WcE_2D": {
+            "EGM": {
+                "ele_ID 2023PromptD Electron-ID-SF": "wp80iso",
+                "ele_Reco 2023PromptD Electron-ID-SF": "",
+                "ele_Trig 2023PromptD Electron-HLT-SF": "HLT_SF_Ele30_MVAiso80ID",
+            },
+        },
+        "ttdilep_sf_2D": {
+            "MUO": {
+                "mu_ID": "NUM_TightID_DEN_TrackerMuons",
+                "mu_Iso": "NUM_TightPFIso_DEN_TightID",
+                "mu_Trig": "NUM_IsoMu24_DEN_CutBasedIdTight_and_PFIsoTight",
+            },
+            "EGM": {
+                "ele_ID 2023PromptD Electron-ID-SF": "wp80iso",
+                "ele_Reco 2023PromptD Electron-ID-SF": "",
+                "ele_Trig 2023PromptD Electron-HLT-SF": "HLT_SF_Ele30_MVAiso80ID",
+            },
+        },
+        "semittM_2D": {
+            "MUO": {
+                "mu_ID": "NUM_TightID_DEN_TrackerMuons",
+                "mu_Iso": "NUM_TightPFIso_DEN_TightID",
+                "mu_Trig": "NUM_IsoMu24_DEN_CutBasedIdTight_and_PFIsoTight",
+            },
+            # # "BTV": {"ctag": "ctagging.json.gz"},
+        },
+        "semittE_2D": {
+            "EGM": {
+                "ele_ID 2023PromptD Electron-ID-SF": "wp80iso",
+                "ele_Reco 2023PromptD Electron-ID-SF": "",
+                "ele_Trig 2023PromptD Electron-HLT-SF": "HLT_SF_Ele30_MVAiso80ID",
+            },
+            # # "BTV": {"ctag": "ctagging.json.gz"},
+        },
     },
     "Summer24": {
         "default": {
             "DC": "Cert_Collisions2024_378981_386951_Golden.json",
-            "LUM": "puWeights_BCDEFGHI.json.gz",
+            # 2024 analyses use eras C-I only (no 2024B)
+            "LUM": "puWeights_CDEFGHI.json.gz",
             "JME": {
                 "MC": "Summer24Prompt24_V5 Summer24Prompt24_JRV2",
                 "Run2024C": "Summer24Prompt24_V5",
@@ -370,19 +581,19 @@ correction_config = {
                 "Run2024I": "Summer24Prompt24_V5",
             },
             "jetveto": {"Summer24Prompt24_RunBCDEFGHI_V1": "jetvetomap"},
-            "MUO": {
-                "mu_ID": "NUM_TightID_DEN_TrackerMuons",
-                "mu_Iso": "NUM_TightPFIso_DEN_TightID",
-            },
-            "EGM": {
-                "ele_Reco 2024 Electron-ID-SF": "",
-                "ele_ID 2024 Electron-ID-SF": "wp80iso",
-            },
-            "muonSS": "",
-            "electronSS": [
-                "Scale",
-                "SmearAndSyst",
-            ],
+            # "MUO": {
+            #     "mu_ID": "NUM_TightID_DEN_TrackerMuons",
+            #     "mu_Iso": "NUM_TightPFIso_DEN_TightID",
+            # },
+            # "EGM": {
+            #     "ele_Reco 2024Prompt Electron-ID-SF": "",
+            #     "ele_ID 2024Prompt Electron-ID-SF": "wp80iso",
+            # },
+            # "muonSS": "",
+            # "electronSS": [
+            #     "Scale",
+            #     "SmearAndSyst",
+            # ],
         },
         "tt_dilep": {
             "MUO": {
@@ -409,6 +620,90 @@ correction_config = {
                 "ele_Trig 2024Prompt Electron-HLT-SF": "HLT_SF_Ele30_MVAiso80ID",  # in the future this should be something like HLT_SF_Ele30_PromptMVAID
             },
         },
+        "DYM_2D": {
+            "MUO": {
+                "mu_ID": "NUM_TightID_DEN_TrackerMuons",
+                "mu_Iso": "NUM_promptMVA_WP64ID_DEN_TightID",
+                # TODO: need to derive double lepton trigger SFs
+                # "mu_Trig": "",
+            },
+            "muonSS": "",
+        },
+        "DYE_2D": {
+            "EGM": {
+                "ele_Reco 2024Prompt Electron-ID-SF": "",
+                "ele_ID 2024Prompt Electron-ID-SF": "PromptMVA-Tight",
+                # TODO: need to derive double lepton trigger SFs
+                # "ele_Trig 2024Prompt Electron-HLT-SF": "",
+            },
+            "electronSS": [
+                "Scale",
+                "SmearAndSyst",
+            ],
+        },
+        "WcM_2D": {
+            "MUO": {
+                "mu_ID": "NUM_TightID_DEN_TrackerMuons",
+                "mu_Iso": "NUM_promptMVA_WP64ID_DEN_TightID",
+                # TODO: need to derive single lepton trigger SFs with prompt MVA
+                "mu_Trig": "NUM_IsoMu24_DEN_CutBasedIdTight_and_PFIsoTight",  # for now
+            },
+            "muonSS": "",
+        },
+        "WcE_2D": {
+            "EGM": {
+                "ele_Reco 2024Prompt Electron-ID-SF": "",
+                "ele_ID 2024Prompt Electron-ID-SF": "PromptMVA-Tight",
+                # TODO: need to derive single lepton trigger SFs with prompt MVA
+                "ele_Trig 2024Prompt Electron-HLT-SF": "HLT_SF_Ele30_MVAiso80ID",  # for now
+            },
+            "electronSS": [
+                "Scale",
+                "SmearAndSyst",
+            ],
+        },
+        "ttdilep_sf_2D": {
+            "MUO": {
+                "mu_ID": "NUM_TightID_DEN_TrackerMuons",
+                "mu_Iso": "NUM_promptMVA_WP64ID_DEN_TightID",
+                # TODO: need to derive double lepton trigger SFs with prompt MVA
+                # "mu_Trig": "",
+            },
+            "muonSS": "",
+            "EGM": {
+                "ele_Reco 2024Prompt Electron-ID-SF": "",
+                "ele_ID 2024Prompt Electron-ID-SF": "PromptMVA-Tight",
+                # TODO: need to derive double lepton trigger SFs with prompt MVA
+                # "ele_Trig 2024Prompt Electron-HLT-SF": "",
+            },
+            "electronSS": [
+                "Scale",
+                "SmearAndSyst",
+            ],
+        },
+        "semittM_2D": {
+            "MUO": {
+                "mu_ID": "NUM_TightID_DEN_TrackerMuons",
+                "mu_Iso": "NUM_promptMVA_WP64ID_DEN_TightID",
+                # TODO: need to derive single lepton trigger SFs with prompt MVA
+                "mu_Trig": "NUM_IsoMu24_DEN_CutBasedIdTight_and_PFIsoTight",  # for now
+            },
+            "muonSS": "",
+            # "BTV": {"ctag": "ctagging.json.gz"},
+        },
+        "semittE_2D": {
+            "EGM": {
+                "ele_Reco 2024Prompt Electron-ID-SF": "",
+                "ele_ID 2024Prompt Electron-ID-SF": "PromptMVA-Tight",
+                # TODO: need to derive single lepton trigger SFs with prompt MVA
+                "ele_Trig 2024Prompt Electron-HLT-SF": "HLT_SF_Ele30_MVAiso80ID",  # for now
+            },
+            "electronSS": [
+                "Scale",
+                "SmearAndSyst",
+            ],
+            # "BTV": {"ctag": "ctagging.json.gz"},
+        },
     },
     "Prompt25": {
         "default": {
@@ -424,22 +719,20 @@ correction_config = {
                 "Run2025F": "Summer24Prompt25_V3",
                 "Run2025G": "Summer24Prompt25_V3",
             },
-            "jetveto": {"Summer24Prompt25_RunCDEFG_V1": "jetvetomap"},
-            "MUO": {
-                "mu_ID": "NUM_TightID_DEN_TrackerMuons",
-                "mu_Iso": "NUM_TightPFIso_DEN_TightID",
-            },
-            "EGM": {
-                "ele_Reco 2025 Electron-ID-SF": "",
-                "ele_ID 2025 Electron-ID-SF": "wp80iso",
-            },
-            # Muon scale & smearing
-            "muonSS": "",
-            # Electron scale & smearing
-            "electronSS": [
-                "Scale",
-                "SmearAndSyst",
-            ],
+            "jetveto": {"Winter25Prompt25_RunCDEFG_V1": "jetvetomap"},
+            # "MUO": {
+            #     "mu_ID": "NUM_TightID_DEN_TrackerMuons",
+            #     "mu_Iso": "NUM_TightPFIso_DEN_TightID",
+            # },
+            # "EGM": {
+            #     "ele_Reco 2025Prompt Electron-ID-SF": "",
+            #     "ele_ID 2025Prompt Electron-ID-SF": "wp80iso",
+            # },
+            # "muonSS": "",
+            # "electronSS": [
+            #     "Scale",
+            #     "SmearAndSyst",
+            # ],
             # Per-POG CVMFS path overrides.
             # JME: data L2L3Residual from Winter25 JME era.
             # JME_MC: MC truth JECs must come from the Summer24 era (L2Relative differs).
@@ -464,8 +757,140 @@ correction_config = {
                 "ele_Trig 2024Prompt Electron-HLT-SF": "HLT_SF_Ele30_MVAiso80ID",  # in the future this should be something like HLT_SF_Ele30_PromptMVAID
             },
         },
+        "DYM_2D": {
+            "MUO": {
+                "mu_ID": "NUM_TightID_DEN_TrackerMuons",
+                "mu_Iso": "NUM_promptMVA_WP64ID_DEN_TightID",
+                # TODO: need to derive double lepton trigger SFs
+                # "mu_Trig": "",
+            },
+            "muonSS": "",
+        },
+        "DYE_2D": {
+            "EGM": {
+                "ele_Reco 2025Prompt Electron-ID-SF": "",
+                # TODO: no 2025 electron PromptMVA ID SFs available yet
+                "ele_ID 2025Prompt Electron-ID-SF": "wp80iso",  # for now
+                # TODO: need to derive double lepton trigger SFs
+                # "ele_Trig 2025Prompt Electron-HLT-SF": "",
+            },
+            "electronSS": [
+                "Scale",
+                "SmearAndSyst",
+            ],
+        },
+        "WcM_2D": {
+            "MUO": {
+                "mu_ID": "NUM_TightID_DEN_TrackerMuons",
+                "mu_Iso": "NUM_promptMVA_WP64ID_DEN_TightID",
+                # TODO: need to derive single lepton trigger SFs with prompt MVA
+                "mu_Trig": "NUM_IsoMu24_DEN_CutBasedIdTight_and_PFIsoTight",  # for now
+            },
+            "muonSS": "",
+        },
+        "WcE_2D": {
+            "EGM": {
+                "ele_Reco 2025Prompt Electron-ID-SF": "",
+                # TODO: no 2025 electron PromptMVA ID SFs available yet
+                "ele_ID 2025Prompt Electron-ID-SF": "wp80iso",  # for now
+                # TODO: need to derive single lepton trigger SFs with prompt MVA
+                # TODO: no 2025 electron trigger SFs available yet
+                # "ele_Trig 2025Prompt Electron-HLT-SF": "HLT_SF_Ele30_MVAiso80ID",  # for now
+            },
+            "electronSS": [
+                "Scale",
+                "SmearAndSyst",
+            ],
+        },
+        "ttdilep_sf_2D": {
+            "MUO": {
+                "mu_ID": "NUM_TightID_DEN_TrackerMuons",
+                "mu_Iso": "NUM_promptMVA_WP64ID_DEN_TightID",
+                # TODO: need to derive double lepton trigger SFs with prompt MVA
+                # "mu_Trig": "",
+            },
+            "muonSS": "",
+            "EGM": {
+                "ele_Reco 2025Prompt Electron-ID-SF": "",
+                # TODO: no 2025 electron PromptMVA ID SFs available yet
+                "ele_ID 2025Prompt Electron-ID-SF": "wp80iso",  # for now
+                # TODO: need to derive double lepton trigger SFs with prompt MVA
+                # "ele_Trig 2025Prompt Electron-HLT-SF": "",
+            },
+            "electronSS": [
+                "Scale",
+                "SmearAndSyst",
+            ],
+        },
+        "semittM_2D": {
+            "MUO": {
+                "mu_ID": "NUM_TightID_DEN_TrackerMuons",
+                "mu_Iso": "NUM_promptMVA_WP64ID_DEN_TightID",
+                # TODO: need to derive single lepton trigger SFs with prompt MVA
+                "mu_Trig": "NUM_IsoMu24_DEN_CutBasedIdTight_and_PFIsoTight",  # for now
+            },
+            "muonSS": "",
+            # "BTV": {"ctag": "ctagging.json.gz"},
+        },
+        "semittE_2D": {
+            "EGM": {
+                "ele_Reco 2025Prompt Electron-ID-SF": "",
+                # TODO: no 2025 electron PromptMVA ID SFs available yet
+                "ele_ID 2025Prompt Electron-ID-SF": "wp80iso",  # for now
+                # TODO: need to derive single lepton trigger SFs with prompt MVA
+                # TODO: no 2025 electron trigger SFs available yet
+                # "ele_Trig 2025Prompt Electron-HLT-SF": "HLT_SF_Ele30_MVAiso80ID",  # for now
+            },
+            "electronSS": [
+                "Scale",
+                "SmearAndSyst",
+            ],
+            # "BTV": {"ctag": "ctagging.json.gz"},
+        },
     },
     "prompt_dataMC": {
         "default": {"DC": "$PROMPT_DATAMC"},
     },
 }
+
+# CustomSummer24: private NanoAODv15 production (extra taggers, phys03/USER samples)
+# on top of the same Summer24 MiniAOD conditions -- reuse Summer24 corrections as-is.
+correction_config["CustomSummer24"] = correction_config["Summer24"]
+correction_config["CustomSummer24UParTPaper"] = correction_config["Summer24"]
+
+# CustomSummer25: CustomSummer24 private MC + private 2025 data NanoTuples. Uses the
+# official "2025 data on Summer24 MC" JME era (Run3-25Prompt-Summer24-NanoAODv15) for
+# MC and data alike; lepton SFs as for Prompt25 (2025Prompt EGM, 2025 MUO).
+correction_config["CustomSummer25"] = {
+    **correction_config["Prompt25"],
+    "default": {
+        "DC": "Cert_Collisions2025_391658_398903_Golden.json",
+        "LUM": "puWeights_2025pp_Golden_Summer24_25ns_69200ub.json.gz",
+        "JME": {
+            "MC": "Summer24Prompt25_V3 Summer24Prompt25_JRV2",
+            "Run2025B": "Summer24Prompt25_V3",
+            "Run2025C": "Summer24Prompt25_V3",
+            "Run2025D": "Summer24Prompt25_V3",
+            "Run2025E": "Summer24Prompt25_V3",
+            "Run2025F": "Summer24Prompt25_V3",
+            "Run2025G": "Summer24Prompt25_V3",
+        },
+        "jetveto": {"Summer24Prompt25_RunCDEFG_V1": "jetvetomap"},
+        # The 2025Prompt EGM era has no electron HLT SFs and no PromptMVA ID SFs (the
+        # selection uses PromptMVA-Tight): take electron reco/ID/HLT SFs from the 2024 era as a
+        # stand-in. Electron scale/smearing keeps its own era (separate "electronSS" key).
+        "cvmfs_override": {
+            "EGM": "Run3-24CDEReprocessingFGHIPrompt-Summer24-NanoAODv15"
+        },
+    },
+}
+for _wf, _cfg in correction_config["CustomSummer25"].items():
+    if (
+        _wf != "default"
+        and "EGM" in _cfg
+        and "EGM" in correction_config["Summer24"].get(_wf, {})
+    ):
+        correction_config["CustomSummer25"][_wf] = {
+            **_cfg,
+            "EGM": correction_config["Summer24"][_wf]["EGM"],
+        }

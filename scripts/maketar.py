@@ -10,6 +10,17 @@ def make_tarfile(output_filename, source_dir, exclude_dirs=[]):
             ]  # Exclude specified directories
             for file in files:
                 file_path = os.path.join(root, file)
+                # Never nest the sandbox tarball inside itself: skip the file we
+                # are writing plus any stale copy at the top of source_dir.
+                # Matched by exact path, not a "*.tar.gz" glob -- that would
+                # also drop the JME Summer23/23BPix payloads under data/.
+                if os.path.abspath(file_path) in (
+                    os.path.abspath(output_filename),
+                    os.path.abspath(
+                        os.path.join(source_dir, "BTVNanoCommissioning.tar.gz")
+                    ),
+                ):
+                    continue
                 tar.add(file_path, arcname=os.path.relpath(file_path, source_dir))
 
 

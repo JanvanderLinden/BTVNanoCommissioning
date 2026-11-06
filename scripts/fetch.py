@@ -78,7 +78,7 @@ parser.add_argument(
     "-r",
     "--redirector",
     help="xrootd ridirector in case sites are not found",
-    choices=["infn", "fnal", "cern"],
+    choices=["infn", "fnal", "cern", "global"],
     default="infn",
 )
 parser.add_argument(
@@ -109,6 +109,14 @@ parser.add_argument(
     help="campaign name (same as the campaign in runner.py)",
     default=None,
     required=True,
+    type=str,
+)
+parser.add_argument(
+    "--DAS_instance",
+    help="DBS instance to search for --from_workflow/--from_dataset lookups, "
+    "e.g. 'prod/phys03' for private/USER productions. Also switches the data "
+    "tier searched to USER instead of NANOAOD*. Default: prod/global.",
+    default="prod/global",
     type=str,
 )
 parser.add_argument("--year", help="year", default=None, type=str)
@@ -314,7 +322,7 @@ def normalize_xrootd_url(url):
     return urls
 
 
-def access_xrootd_file(url, xrootd_tools, check_all_variants=False):
+def access_xrootd_file(url, xrootd_tools):
     """Try to access file with variants of the URL using both stat and open"""
     from XRootD import client
     import threading
@@ -353,7 +361,6 @@ def access_xrootd_file(url, xrootd_tools, check_all_variants=False):
 
     timeout = 30  # 40 seconds timeout
     url_variants = normalize_xrootd_url(url)
-    success_results = []
 
     for variant in url_variants:
         variant_success = False
@@ -371,9 +378,7 @@ def access_xrootd_file(url, xrootd_tools, check_all_variants=False):
             if open_status.ok:
                 file_client.close()
                 variant_success = True
-                success_results.append((True, variant, "open"))
-                if not check_all_variants:
-                    return True, variant
+                return True, variant
         except TimeoutException:
             print(f"⚠️ Open timed out after {timeout}s with URL variant {variant}")
         except Exception as e:
@@ -392,18 +397,11 @@ def access_xrootd_file(url, xrootd_tools, check_all_variants=False):
 
                 if status.ok:
                     variant_success = True
-                    success_results.append((True, variant, "stat"))
-                    if not check_all_variants:
-                        return True, variant
+                    return True, variant
             except TimeoutException:
                 print(f"⚠️ Stat timed out after {timeout}s with URL variant {variant}")
             except Exception as e:
                 print(f"❌ Stat failed with URL variant {variant}: {e}")
-
-    # If we get here and check_all_variants=True, we need to check if any variant succeeded
-    if success_results:
-        # Return the first success (or you could choose based on other criteria)
-        return success_results[0][0], success_results[0][1]
 
     return False, None
 
@@ -952,24 +950,10 @@ def check_xrootd_availability():
     }
 
 
-def check_site_completion(site, dataset, xrootd_tools):
+def check_site_completion(site, dataset, xrootd_tools, total_files_count):
     """Check what percentage of the dataset is available at the site by directly counting files"""
     try:
-        # Get total file list once for the entire dataset
         in_ci = determine_execution_mode()
-
-        if in_ci:
-            total_files_cmd = f'/cms.cern.ch/common/dasgoclient -query="file dataset={dataset} | grep file.name"'
-        else:
-            total_files_cmd = (
-                f'dasgoclient -query="file dataset={dataset} | grep file.name"'
-            )
-
-        # print(f"Getting file list for {dataset}...")
-        total_files_result = run_das_command(total_files_cmd)
-        total_files_count = len(
-            [f for f in total_files_result if f and not f.startswith("ERROR:")]
-        )
 
         if total_files_count == 0:
             print_dataset_empty(dataset)
@@ -1010,6 +994,43 @@ def check_site_completion(site, dataset, xrootd_tools):
         return 0.0
 
 
+def get_origin_sites_for_dataset(dataset, in_ci):
+    """
+    Private (phys03/USER) productions have no Rucio replica records, so the
+    Rucio-backed 'site dataset=...' query always comes back empty for them
+    (dasgoclient just prints a WARNING and gives up). DBS still records which
+    site each block was originally written to (origin_site_name), and for
+    CRAB-submitted private productions that's the single site holding 100%
+    of the dataset. Recover it directly from block metadata instead of
+    falling back to the (slower, load-balanced) global redirector.
+    """
+    if in_ci:
+        query = f'/cms.cern.ch/common/dasgoclient -query="block dataset={dataset} instance=prod/phys03 | grep block.origin_site_name"'
+    else:
+        query = f'dasgoclient -query="block dataset={dataset} instance=prod/phys03 | grep block.origin_site_name"'
+
+    try:
+        result = run_das_command(query)
+    except Exception as e:
+        print(f"Error with origin_site query: {e}")
+        return []
+
+    # dasgoclient pads these lines with trailing whitespace
+    sites = [
+        s.strip()
+        for s in result
+        if s.strip() and not s.startswith(("WARNING", "ERROR"))
+    ]
+    if not sites:
+        return []
+
+    # Most common origin site first (a dataset normally has a single origin site)
+    counts = {}
+    for s in sites:
+        counts[s] = counts.get(s, 0) + 1
+    return sorted(counts, key=counts.get, reverse=True)
+
+
 def check_site_responsiveness(
     site, sites_xrootd_prefix, xrootd_tools, dataset_files=None
 ):
@@ -1043,13 +1064,24 @@ def check_site_responsiveness(
         # Test each file
         successful_files = 0
         failed_files = []
+        max_attempts = 5
+        retry_delay = 10  # seconds -- sites are sometimes momentarily flaky
         for idx, test_file in enumerate(dataset_files):
             # Construct the full PFN using the site's redirector rules
             full_pfn = _get_pfn_for_site(test_file, sites_xrootd_prefix[site])
-            # Use the existing access_xrootd_file function
-            success, working_url = access_xrootd_file(
-                full_pfn, xrootd_tools, check_all_variants=True
-            )
+            # Use the existing access_xrootd_file function, retrying a transient
+            # failure a few times before giving up on this file
+            success, working_url = False, None
+            for attempt in range(1, max_attempts + 1):
+                success, working_url = access_xrootd_file(full_pfn, xrootd_tools)
+                if success:
+                    break
+                if attempt < max_attempts:
+                    if args.verbose:
+                        print(
+                            f"⚠️ File {idx+1}/{total_files} not accessible (attempt {attempt}/{max_attempts}), retrying in {retry_delay}s..."
+                        )
+                    time.sleep(retry_delay)
 
             if success:
                 successful_files += 1
@@ -1073,8 +1105,10 @@ def check_site_responsiveness(
                         "redirector": redirector,
                     }
             else:
-                print(f"❌ File {idx+1}/{total_files} NOT accessible")
-                # Fail fast - stop checking as soon as one file fails
+                print(
+                    f"❌ File {idx+1}/{total_files} NOT accessible after {max_attempts} attempts"
+                )
+                # Fail fast - stop checking as soon as one file fails all retries
                 print(
                     f"❌ Site {site} fails - file {idx+1}/{total_files} not accessible"
                 )
@@ -1288,13 +1322,17 @@ def getFilesFromDas(args):
 
             # Extract primary dataset name
             primary_name = dataset.split("/")[1]
-            # More precise check for data: should contain "/Run20XX" pattern
-            # Data pattern: /MuonEG/Run2024G-MINIv6NANOv15-v3/NANOAOD
-            data_run_pattern = re.search(r"/Run20\d\d[A-Z]", dataset)
+            # More precise check for data: should contain a "Run20XX<era>" pattern.
+            # Central data: /MuonEG/Run2024G-MINIv6NANOv15-v3/NANOAOD (preceded by "/")
+            # Private phys03/USER production tuples embed it mid-string instead, e.g.
+            # /EGamma0/CustomNanoAODv15-..._Run2024C-MINIv6NANOv15-v1-.../USER
+            # (preceded by "_"), so match either separator and pull the run period
+            # directly instead of relying on a fixed split position.
+            data_run_pattern = re.search(r"[/_](Run20\d\d[A-Z])", dataset)
 
             if data_run_pattern:
                 # This is actual data with a real run period
-                run_period = dataset.split("/")[2].split("-")[0]  # Gets 'Run2024X'
+                run_period = data_run_pattern.group(1)  # Gets 'Run2024X'
                 dsname = f"{primary_name}{run_period}"
             else:
                 # This is MC - use only the primary dataset name
@@ -1368,6 +1406,13 @@ def getFilesFromDas(args):
 
             try:
                 sites = run_das_command(query)
+                # dasgoclient prints a plain "WARNING: No site records found in
+                # Rucio, ..." line to stdout for phys03/USER datasets instead
+                # of returning nothing -- strip that out so it isn't mistaken
+                # for a site name.
+                sites = [
+                    s for s in sites if s and not s.startswith(("WARNING", "ERROR"))
+                ]
                 if sites:
                     if args.verbose:
                         print(f"Found {len(sites)} sites with query: {query}")
@@ -1377,17 +1422,75 @@ def getFilesFromDas(args):
 
         # Fallback to default redirector if no sites found
         if not sites:
+            # Rucio has no replica info for private productions, so try to
+            # recover the block's origin site from DBS before giving up.
+            best_site = None
+            origin_sites = get_origin_sites_for_dataset(dataset, in_ci)
+            if origin_sites:
+                xrootd_tools = check_xrootd_availability()
+                sites_xrootd_prefix = get_xrootd_sites_map()
+                for origin_site in origin_sites:
+                    if origin_site not in sites_xrootd_prefix:
+                        print(
+                            f"WARNING: origin site {origin_site} for '{dataset}' has no XRootD access in our map, skipping"
+                        )
+                        continue
+                    if (
+                        args.blacklist_sites is not None
+                        and origin_site in args.blacklist_sites
+                    ):
+                        continue
+                    if (
+                        args.whitelist_sites is not None
+                        and origin_site not in args.whitelist_sites
+                    ):
+                        continue
+                    if check_site_responsiveness(
+                        origin_site,
+                        sites_xrootd_prefix,
+                        xrootd_tools,
+                        dataset_files=flist,
+                    ):
+                        best_site = origin_site
+                        print(
+                            f"Using origin site {origin_site} for private dataset '{dataset}' (100% complete by construction)"
+                        )
+                        break
+
+            if args.limit is not None:
+                flist = flist[: args.limit]
+
+            if best_site:
+                if best_site in site_url_formats:
+                    redirector = site_url_formats[best_site]["redirector"]
+                    paths = [
+                        f"{redirector}{f.lstrip('/')}" for f in flist if len(f) > 1
+                    ]
+                else:
+                    paths = [
+                        _get_pfn_for_site(f, sites_xrootd_prefix[best_site])
+                        for f in flist
+                        if len(f) > 1
+                    ]
+                validated_paths = [validate_xrootd_path(p) for p in paths]
+                if dsname not in fdict:
+                    fdict[dsname] = validated_paths
+                else:
+                    fdict[dsname].extend(validated_paths)
+                print(f"Added {len(fdict[dsname])} files for dataset {dsname}")
+                continue
+
             print(
                 f"WARNING: No sites found for dataset '{dataset}', using global redirector"
             )
             redirector = {
                 "infn": "root://xrootd-cms.infn.it//",
                 "fnal": "root://cmsxrootd.fnal.gov/",
-                "cern": "root://cms-xrd-global.cern.ch/",
+                "cern": "root://eoscms.cern.ch/",
+                "ghent": "root://maite.iihe.ac.be/",
+                "global": "root://cms-xrd-global.cern.ch/",
             }
             xrd = redirector[args.redirector]
-            if args.limit is not None:
-                flist = flist[: args.limit]
             if dsname not in fdict:
                 fdict[dsname] = [xrd + f for f in flist if len(f) > 1]
             else:
@@ -1427,7 +1530,12 @@ def getFilesFromDas(args):
                 continue
 
             # Only check completion first
-            completion = check_site_completion(site, dataset, xrootd_tools)
+            completion = check_site_completion(
+                site,
+                dataset,
+                xrootd_tools,
+                len([f for f in flist if f and not f.startswith("ERROR:")]),
+            )
 
             # Save all sites with files for sorting
             if completion > 0:
@@ -1480,7 +1588,9 @@ def getFilesFromDas(args):
             redirector = {
                 "infn": "root://xrootd-cms.infn.it//",
                 "fnal": "root://cmsxrootd.fnal.gov/",
-                "cern": "root://cms-xrd-global.cern.ch/",
+                "cern": "root://eoscms.cern.ch/",
+                "ghent": "root://maite.iihe.ac.be/",
+                "global": "root://cms-xrd-global.cern.ch/",
             }
             xrd = redirector[args.redirector]
 
@@ -1508,7 +1618,9 @@ def getFilesFromDas(args):
                 redirector = {
                     "infn": "root://xrootd-cms.infn.it//",
                     "fnal": "root://cmsxrootd.fnal.gov/",
-                    "cern": "root://cms-xrd-global.cern.ch/",
+                    "cern": "root://eoscms.cern.ch/",
+                    "ghent": "root://maite.iihe.ac.be/",
+                    "global": "root://cms-xrd-global.cern.ch/",
                 }
                 xrd = redirector[args.redirector]
 
@@ -1803,8 +1915,15 @@ def direct_das_query(dataset_name, campaign_pattern):
     # Remove extra asterisks which cause problems
     clean_pattern = campaign_pattern.replace("**", "*")
 
+    # Private productions (e.g. a custom NanoAOD re-tuple of an official campaign)
+    # aren't published to prod/global as NANOAOD* -- they live in prod/phys03 as
+    # /USER datasets instead. --DAS_instance switches both the DBS instance and
+    # the data tier searched; central campaigns are unaffected (default unchanged).
+    instance = getattr(args, "DAS_instance", None) or "prod/global"
+    tier = "USER" if instance == "prod/phys03" else "NANOAOD*"
+
     # Build query for dataset discovery
-    query = f"dataset=/{dataset_name}/*{clean_pattern}*/NANOAOD*"
+    query = f"dataset=/{dataset_name}/*{clean_pattern}*/{tier}"
 
     if args.verbose:
         print(f"Executing direct DAS query: {query}")
@@ -1816,7 +1935,7 @@ def direct_das_query(dataset_name, campaign_pattern):
 
         if not in_ci:
             # For local environment - use direct dasgoclient call
-            cmd = f'dasgoclient -query="instance=prod/global {query}"'
+            cmd = f'dasgoclient -query="instance={instance} {query}"'
 
             if args.verbose:
                 print(f"Local command: {cmd}")
@@ -1825,7 +1944,7 @@ def direct_das_query(dataset_name, campaign_pattern):
         else:
             # For CI environment - use the two-step approach
             # First query without wildcards in the campaign pattern
-            basic_query = f'/cms.cern.ch/common/dasgoclient -query="dataset=/{dataset_name}/*{clean_pattern}*/NANOAOD* instance=prod/global"'
+            basic_query = f'/cms.cern.ch/common/dasgoclient -query="dataset=/{dataset_name}/*{clean_pattern}*/{tier} instance={instance}"'
             print(f"CI basic query: {basic_query}")
 
             # Use the existing run_das_command function

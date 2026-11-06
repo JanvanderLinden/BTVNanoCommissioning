@@ -1,20 +1,8 @@
 import os
 import json
 import shutil
-import tarfile
 import argparse
 import subprocess
-
-
-def make_tarfile(output_filename, source_dir, exclude_dirs=[]):
-    with tarfile.open(output_filename, "w:gz") as tar:
-        for root, dirs, files in os.walk(source_dir):
-            dirs[:] = [
-                d for d in dirs if d not in exclude_dirs
-            ]  # Exclude specified directories
-            for file in files:
-                file_path = os.path.join(root, file)
-                tar.add(file_path, arcname=os.path.relpath(file_path, source_dir))
 
 
 # From https://github.com/PocketCoffea/PocketCoffea/blob/main/pocket_coffea/utils/network.py
@@ -99,13 +87,14 @@ def get_main_parser():
         "--campaign",
         default="Summer23",
         choices=[
-            "Rereco17_94X",
-            "Winter22Run3",
             "Summer22",
             "Summer22EE",
             "Summer23",
             "Summer23BPix",
             "Summer24",
+            "CustomSummer24",
+            "CustomSummer24UParTPaper",
+            "CustomSummer25",
             "2018-UL",
             "2017-UL",
             "2016preVFP-UL",
@@ -130,7 +119,40 @@ def get_main_parser():
         ],
         help="Run with systematics, all, weights_only(no JERC uncertainties included),JERC_split, None",
     )
+    parser.add_argument(
+        "--ttbar-reweights",
+        dest="ttbar_reweights",
+        default="none",
+        choices=["none", "hdamp_ml", "full"],
+        help=(
+            "Forwarded to runner.py --ttbar-reweights: enable additional "
+            "ttbar event reweights in correction.py. 'hdamp_ml' applies hdamp "
+            "ONNX up/down; 'full' additionally reserves hooks for frag/decay "
+            "reweights. Default: %(default)s"
+        ),
+    )
+    parser.add_argument(
+        "--nlo-reweight",
+        dest="nlo_reweight",
+        action="store_true",
+        help="Forwarded to runner.py --nlo-reweight",
+    )
+    parser.add_argument(
+        "--vjets-stitch",
+        dest="vjets_stitch",
+        default=None,
+        type=lambda p: os.path.abspath(p),
+        help="Forwarded to runner.py --vjets-stitch (FxFx W/DY LHE stitching json).",
+    )
     parser.add_argument("--isArray", action="store_true", help="Output root files")
+    parser.add_argument(
+        "--array-systs",
+        dest="array_systs",
+        default="none",
+        choices=["none", "weights", "shifts", "both"],
+        help="Forwarded to runner.py --array-systs: how much systematic "
+        "content the --isArray trees carry. Default: %(default)s",
+    )
 
     parser.add_argument(
         "--noHist", action="store_true", help="Not output coffea histogram"
@@ -178,32 +200,6 @@ if __name__ == "__main__":
 
     current_dir = os.path.dirname(os.path.abspath(__file__))
     base_dir = current_dir.replace("/condor_lxplus", "")
-    """
-    if args.remoteRepo is not None:
-        print("Will use a remote path to access BTVNanoCommissioning:", args.remoteRepo)
-    else:
-        print("Tarring BTVNanoCommissioning directory...")
-
-        skip_tar = False
-        if os.path.exists("BTVNanoCommissioning.tar.gz"):
-            user_input = input(
-                "BTVNanoCommissioning.tar.gz already exists, skip the tarring? (y/n): "
-            )
-            if user_input.lower() == "y":
-                skip_tar = True
-            elif user_input.lower() == "n":
-                skip_tar = False
-                os.remove("BTVNanoCommissioning.tar.gz")
-            else:
-                raise Exception("Invalid input, exiting")
-
-        if not skip_tar:
-            make_tarfile(
-                "BTVNanoCommissioning.tar.gz",
-                base_dir,
-                exclude_dirs=["jsonpog-integration", "BTVNanoCommissioning.egg-info"],
-            )
-    """
     # Create job dir
     job_dir = f"jobs_{args.jobName}"
     if os.path.exists(job_dir):

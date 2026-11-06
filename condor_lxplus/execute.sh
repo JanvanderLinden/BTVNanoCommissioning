@@ -24,7 +24,7 @@ export PATH="$ENVPATH:$PATH"
 python -c "import json, os; flname = 'split_samples.json' if os.path.isfile(f'$WORKDIR/split_samples.json') else 'split_samples_resubmit.json';  json.dump(json.load(open(f'$WORKDIR/{flname}'))['$JOBID'], open('$WORKDIR/sample.json', 'w'), indent=4)"
 
 declare -A ARGS
-for key in workflow output samplejson year campaign isSyst isArray noHist overwrite voms chunk skipbadfiles outputDir remoteRepo selectionModifier; do
+for key in workflow output samplejson year campaign isSyst isArray array_systs ttbar_reweights vjets_stitch nlo_reweight noHist overwrite voms chunk skipbadfiles outputDir remoteRepo selectionModifier; do
     ARGS[$key]=$(jq -r ".$key" $WORKDIR/arguments.json)
 done
 
@@ -38,6 +38,18 @@ if [ "${ARGS[selectionModifier]}" != "null" ]; then
 fi
 if [ "${ARGS[isSyst]}" != "false" ]; then
     OPTS="$OPTS --isSyst ${ARGS[isSyst]}"
+fi
+if [ "${ARGS[array_systs]}" != "none" ]; then
+    OPTS="$OPTS --array-systs ${ARGS[array_systs]}"
+fi
+if [ "${ARGS[nlo_reweight]}" == true ]; then
+    OPTS="$OPTS --nlo-reweight"
+fi
+if [ "${ARGS[vjets_stitch]}" != "null" ]; then
+    OPTS="$OPTS --vjets-stitch ${ARGS[vjets_stitch]}"
+fi
+if [ "${ARGS[ttbar_reweights]}" != "none" ]; then
+    OPTS="$OPTS --ttbar-reweights ${ARGS[ttbar_reweights]}"
 fi
 
 for key in  isArray noHist overwrite skipbadfiles; do

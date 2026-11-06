@@ -4,3 +4,4 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools_scm]
 write_to = "src/BTVNanoCommissioning/version.py"
+fallback_version = "0.0.0"

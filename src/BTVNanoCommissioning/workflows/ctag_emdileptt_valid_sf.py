@@ -37,6 +37,7 @@ class NanoProcessor(processor.ProcessorABC):
         isArray=False,
         noHist=False,
         chunksize=75000,
+        ttbar_reweights="none",
     ):
         self._year = year
         self._campaign = campaign
@@ -46,6 +47,7 @@ class NanoProcessor(processor.ProcessorABC):
         self.noHist = noHist
         self.lumiMask = load_lumi(self._campaign)
         self.chunksize = chunksize
+        self.ttbar_reweights = ttbar_reweights
         # Load corrections
         self.SF_map = load_SF(self._year, self._campaign)
 
@@ -55,7 +57,12 @@ class NanoProcessor(processor.ProcessorABC):
 
     def process(self, events):
         events = missing_branch(events)
-        sumws = reweighting(events, self.isSyst)
+        sumws = reweighting(
+            events,
+            self.isSyst,
+            ttbar_reweights=self.ttbar_reweights,
+            campaign=self._campaign,
+        )
         vetoed_events, shifts = common_shifts(self, events)
 
         return processor.accumulate(
@@ -78,25 +85,8 @@ class NanoProcessor(processor.ProcessorABC):
 
         if shift_name is None:
             output["sumw"] = sumws["sumw"]
-            if not isRealData and self.isSyst:
-                if "LHEPdfWeight" in events.fields:
-                    output["PDF_sumwUp"] = sumws["PDF_sumwUp"]
-                    output["PDF_sumwDown"] = sumws["PDF_sumwDown"]
-                    output["aS_sumwUp"] = sumws["aS_sumwUp"]
-                    output["aS_sumwDown"] = sumws["aS_sumwDown"]
-                    output["PDFaS_sumwUp"] = sumws["PDFaS_sumwUp"]
-                    output["PDFaS_sumwDown"] = sumws["PDFaS_sumwDown"]
-                if "LHEScaleWeight" in events.fields:
-                    output["muR_sumwUp"] = sumws["muR_sumwUp"]
-                    output["muR_sumwDown"] = sumws["muR_sumwDown"]
-                    output["muF_sumwUp"] = sumws["muF_sumwUp"]
-                    output["muF_sumwDown"] = sumws["muF_sumwDown"]
-                if "PSWeight" in events.fields:
-                    if len(events.PSWeight[0]) == 4:
-                        output["ISR_sumwUp"] = sumws["ISR_sumwUp"]
-                        output["ISR_sumwDown"] = sumws["ISR_sumwDown"]
-                        output["FSR_sumwUp"] = sumws["FSR_sumwUp"]
-                        output["FSR_sumwDown"] = sumws["FSR_sumwDown"]
+            # one sum per generator-level variation, see correction.reweighting
+            output.update({k: v for k, v in sumws.items() if k.startswith("sumw_")})
 
         ####################
         #    Selections    #
@@ -123,12 +113,8 @@ class NanoProcessor(processor.ProcessorABC):
         req_trig_mu = HLT_helper(events, trigger_hm)
 
         # Muon cuts
-        iso_muon_mu = events.Muon[
-            (events.Muon.pt > 24) & mu_idiso(events, self._campaign)
-        ]
-        iso_muon_ele = events.Muon[
-            (events.Muon.pt > 14) & mu_idiso(events, self._campaign)
-        ]
+        iso_muon_mu = events.Muon[(events.Muon.pt > 24) & mu_idiso(events)]
+        iso_muon_ele = events.Muon[(events.Muon.pt > 14) & mu_idiso(events)]
 
         # Electron cuts
         iso_ele_ele = events.Electron[
@@ -166,7 +152,7 @@ class NanoProcessor(processor.ProcessorABC):
         req_jets = ak.count(event_jet.pt, axis=1) >= 2
 
         # Soft Muon cuts
-        soft_muon = events.Muon[softmu_mask(events, self._campaign)]
+        soft_muon = events.Muon[softmu_mask(events)]
         req_softmu = ak.count(soft_muon.pt, axis=1) >= 1
 
         # Muon jet cuts
@@ -237,11 +223,15 @@ class NanoProcessor(processor.ProcessorABC):
         pruned_ev["SelElectron"] = iso_ele[event_level][:, 0]
         pruned_ev["MuonJet"] = mu_jet[event_level][:, 0]
         pruned_ev["SoftMuon"] = soft_muon[event_level][:, 0]
-        pruned_ev["dilep"] = pruned_ev.SelMuon + pruned_ev.SelElectron
-        pruned_ev["dilep", "pt"] = pruned_ev.dilep.pt
-        pruned_ev["dilep", "eta"] = pruned_ev.dilep.eta
-        pruned_ev["dilep", "phi"] = pruned_ev.dilep.phi
-        pruned_ev["dilep", "mass"] = pruned_ev.dilep.mass
+        sdilep = pruned_ev.SelMuon + pruned_ev.SelElectron
+        # a plain (behavior-less) record, not sdilep itself -- attaching pt/eta/
+        # phi/mass fields onto sdilep's own vector-behaved record would leave it
+        # with both cartesian (x,y from the sum) and polar (pt/eta/phi/mass)
+        # fields at once, which awkward2's CandidateArray validation rejects on
+        # any later access (e.g. histogramming)
+        pruned_ev["dilep"] = ak.zip(
+            {"pt": sdilep.pt, "eta": sdilep.eta, "phi": sdilep.phi, "mass": sdilep.mass}
+        )
         if "PFCands" in events.fields:
             pruned_ev["PFCands"] = PFCand_link(events, event_level, jetindx)
         # Add custom variables
@@ -261,7 +251,7 @@ class NanoProcessor(processor.ProcessorABC):
             pruned_ev,
             self.SF_map,
             self.isSyst,
-            ttbar_reweights=getattr(self, "ttbar_reweights", "none"),
+            ttbar_reweights=self.ttbar_reweights,
             campaign=self._campaign,
         )
         # Configure systematics

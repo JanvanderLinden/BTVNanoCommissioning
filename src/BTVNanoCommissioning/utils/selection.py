@@ -21,7 +21,61 @@ def HLT_helper(events, triggers):
     return req_trig
 
 
+_SEL_CACHE = {}
+
+
+def _coll_fingerprint(coll, fields=("pt", "eta", "phi")):
+    """Identity of an object collection for the selection caches: counts and the
+    kinematics. The JES/JER and lepton-scale shifts change only pt (and mass), so
+    equal fingerprints mean the same objects with the same ID inputs."""
+    parts = [hash(ak.to_numpy(ak.num(coll)).tobytes())]
+    for f in fields:
+        parts.append(hash(ak.to_numpy(ak.flatten(coll[f], axis=None)).tobytes()))
+    return tuple(parts)
+
+
+def _cached(key, compute):
+    """Small cache (last 16 results) for selection masks repeated in every shift."""
+    if key not in _SEL_CACHE:
+        if len(_SEL_CACHE) >= 16:
+            _SEL_CACHE.pop(next(iter(_SEL_CACHE)))
+        _SEL_CACHE[key] = compute()
+    return _SEL_CACHE[key]
+
+
+def _chunk(events):
+    m = getattr(events, "metadata", None) or {}
+    return (m.get("filename"), m.get("entrystart"))
+
+
+_JETID_CACHE = {}
+
+
+def _jet_fingerprint(events, campaign):
+    # same chunk and the same jets (JES/JER shifts change only pt and mass)
+    m = getattr(events, "metadata", None) or {}
+    eta = ak.to_numpy(ak.flatten(events.Jet.eta))
+    phi = ak.to_numpy(ak.flatten(events.Jet.phi))
+    return (
+        m.get("filename"),
+        m.get("entrystart"),
+        campaign,
+        hash(ak.to_numpy(ak.num(events.Jet)).tobytes()),
+        hash(eta.tobytes()),
+        hash(phi.tobytes()),
+    )
+
+
 def jet_id(events, campaign, max_eta=2.5, min_pt=20):
+    key = _jet_fingerprint(events, campaign)
+    if key not in _JETID_CACHE:
+        _JETID_CACHE.clear()
+        _JETID_CACHE[key] = _jet_id_flags(events, campaign)
+    jetid = _JETID_CACHE[key]
+    return (events.Jet.pt > min_pt) & (abs(events.Jet.eta) <= max_eta) & (jetid)
+
+
+def _jet_id_flags(events, campaign):
     # Run 3 NanoAODs have a bug in jetId
     # Implement fix from:
     # https://twiki.cern.ch/twiki/bin/viewauth/CMS/JetID13p6TeV#nanoAOD_Flags
@@ -51,6 +105,9 @@ def jet_id(events, campaign, max_eta=2.5, min_pt=20):
         "Summer23BPix",
         "Winter24",
         "Summer24",
+        "CustomSummer24",
+        "CustomSummer24UParTPaper",
+        "CustomSummer25",
         "Winter25",
         "Prompt25",
     ]:
@@ -165,29 +222,27 @@ def jet_id(events, campaign, max_eta=2.5, min_pt=20):
     else:
         jetid = events.Jet.jetId >= 5
 
-    jetid = ak.values_astype(jetid, bool)
-
-    if campaign == "Rereco17_94X":
-        # Use puId for Run2
-        jetmask = (
-            (events.Jet.pt > min_pt)
-            & (abs(events.Jet.eta) <= max_eta)
-            & (jetid)
-            & ((events.Jet.pt > 50) | (events.Jet.puId >= 7))
-        )
-    else:
-        jetmask = (events.Jet.pt > min_pt) & (abs(events.Jet.eta) <= max_eta) & (jetid)
-
-    return jetmask
+    return ak.values_astype(jetid, bool)
 
 
-## FIXME: Electron cutbased Id & MVA ID not exist in Winter22Run3 sample
-def ele_cuttightid(events, campaign):
-    ele_etaSC = (
+def _ele_etaSC(events, campaign):
+    return (
         events.Electron.eta + events.Electron.deltaEtaSC
-        if campaign not in ["Summer24", "Winter25", "Prompt25"]
+        if campaign
+        not in [
+            "Summer24",
+            "CustomSummer24",
+            "CustomSummer24UParTPaper",
+            "CustomSummer25",
+            "Winter25",
+            "Prompt25",
+        ]
         else events.Electron.superclusterEta
     )
+
+
+def ele_cuttightid(events, campaign):
+    ele_etaSC = _ele_etaSC(events, campaign)
     elemask = (
         (abs(ele_etaSC) < 1.4442) | ((abs(ele_etaSC) > 1.566) & (abs(ele_etaSC) < 2.5))
     ) & (events.Electron.cutBased > 3)
@@ -195,11 +250,7 @@ def ele_cuttightid(events, campaign):
 
 
 def ele_mvatightid(events, campaign):
-    ele_etaSC = (
-        events.Electron.eta + events.Electron.deltaEtaSC
-        if campaign not in ["Summer24", "Winter25", "Prompt25"]
-        else events.Electron.superclusterEta
-    )
+    ele_etaSC = _ele_etaSC(events, campaign)
     elemask = (
         (abs(ele_etaSC) < 1.4442) | ((abs(ele_etaSC) > 1.566) & (abs(ele_etaSC) < 2.5))
     ) & (events.Electron.mvaIso_WP80 > 0.5)
@@ -207,23 +258,65 @@ def ele_mvatightid(events, campaign):
 
 
 def ele_promptmvaid(events, campaign):
+    try:
+        key = (
+            "ele_promptmva",
+            campaign,
+            _chunk(events),
+            _coll_fingerprint(events.Electron),
+        )
+    except Exception:
+        return _ele_promptmvaid(events, campaign)
+    return _cached(key, lambda: _ele_promptmvaid(events, campaign))
+
+
+def _ele_promptmvaid(events, campaign):
     # https://indico.cern.ch/event/1575017/contributions/6635248/attachments/3115862/5524310/EGammaAug08.pdf
-    ele_etaSC = (
-        events.Electron.eta + events.Electron.deltaEtaSC
-        if campaign not in ["Summer24", "Winter25", "Prompt25"]
-        else events.Electron.superclusterEta
-    )
+    if campaign not in [
+        "Summer24",
+        "CustomSummer24",
+        "CustomSummer24UParTPaper",
+        "CustomSummer25",
+        "Winter25",
+        "Prompt25",
+    ]:
+        # No promptMVA WP is defined/validated for this campaign yet. All
+        # current call sites already gate on the campaign list above before
+        # calling this function, so this branch should be unreachable; it's
+        # an explicit guard rather than a real cut.
+        raise NotImplementedError(
+            f"ele_promptmvaid has no promptMVA working point defined for campaign '{campaign}'"
+        )
+    ele_etaSC = _ele_etaSC(events, campaign)
     elemask = (
-        (abs(ele_etaSC) < 1.4442) | ((abs(ele_etaSC) > 1.566) & (abs(ele_etaSC) < 2.5))
+        (abs(ele_etaSC) < 1.4442)
+        | ((abs(ele_etaSC) > 1.566) & (abs(ele_etaSC) < 2.4))
+        # ) & (events.Electron.promptMVA >= 0.8) #Medium
     ) & (
         events.Electron.promptMVA >= 0.9
-        if campaign in ["Summer24", "Winter25", "Prompt25"]
-        else 0.3
-    )
+    )  # Tight
+
+    # we also need to add the following cuts as preselection:
+    # miniPFRelIso_all < 0.4
+    # sip3d < 8
+    # |dxy| < 0.05
+    # |dz| < 0.1
+    # pT > 10 GeV
+    # Missing inner hits < 2
+    # |eta| < 2.4 (analysis choice, user 2026-10-23; EGM preselection is 2.5)
+
+    elemask = elemask & (events.Electron.miniPFRelIso_all < 0.4)
+    elemask = elemask & (events.Electron.sip3d < 8)
+    elemask = elemask & (abs(events.Electron.dxy) < 0.05)
+    elemask = elemask & (abs(events.Electron.dz) < 0.1)
+    elemask = elemask & (events.Electron.pt > 10)
+    # elemask =  elemask & (events.Electron.MissingInnerHits < 2)
+    elemask = elemask & (abs(events.Electron.eta) < 2.4)
+
     return elemask
 
 
-def softmu_mask(events, campaign, dxySigCut=0):
+def softmu_mask(events, dxySigCut=0):
     softmumask = (
         (events.Muon.pt < 25)
         & (abs(events.Muon.eta) < 2.4)
@@ -235,7 +328,7 @@ def softmu_mask(events, campaign, dxySigCut=0):
     return softmumask
 
 
-def mu_idiso(events, campaign):
+def mu_idiso(events):
     mumask = (
         (abs(events.Muon.eta) < 2.4)
         & (events.Muon.tightId > 0.5)
@@ -244,7 +337,15 @@ def mu_idiso(events, campaign):
     return mumask
 
 
-def mu_promptmvaid(events, campaign):
+def mu_promptmvaid(events):
+    try:
+        key = ("mu_promptmva", _chunk(events), _coll_fingerprint(events.Muon))
+    except Exception:
+        return _mu_promptmvaid(events)
+    return _cached(key, lambda: _mu_promptmvaid(events))
+
+
+def _mu_promptmvaid(events):
     # https://muon-wiki.docs.cern.ch/guidelines/recommendations/#prompt-mva-formerly-tth-mva
     # https://muon-wiki.docs.cern.ch/guidelines/recommendations/#muon-isolation
     # https://cms-talk.web.cern.ch/t/prompt-mva-sfs-definition/132578
@@ -254,10 +355,41 @@ def mu_promptmvaid(events, campaign):
         & (events.Muon.tightId > 0.5)
         & (events.Muon.promptMVA > 0.64)
     )
+
+    # additionally the following cuts as preselection:
+    # miniPFRelIso_all < 0.4
+    # sip3d < 8
+    # |dxy| < 0.05 cm
+    # |dz| < 0.1 cm
+    # pT > 10 GeV
+    # abs eta < 2.4
+    # isGlobal || isTracker
+    # isPFCand == 1
+    # mediumID == 1
+
+    mumask = mumask & (events.Muon.miniPFRelIso_all < 0.4)
+    mumask = mumask & (events.Muon.sip3d < 8)
+    mumask = mumask & (abs(events.Muon.dxy) < 0.05)
+    mumask = mumask & (abs(events.Muon.dz) < 0.1)
+    mumask = mumask & (events.Muon.pt > 10)
+    mumask = mumask & (events.Muon.isGlobal | events.Muon.isTracker)
+    # Muon_isPFCand is not written by NanoAODv15, and this function is only
+    # ever reached for v15 campaigns (Summer24, CustomSummer24, Winter25,
+    # Prompt25 -- older campaigns route to mu_idiso instead), so the branch is
+    # absent every time. Verified by direct inspection of the Summer24,
+    # CustomSummer24 and Prompt25 tuples: 54 Muon_* branches, no isPFCand.
+    # Guarded rather than deleted so the cut applies again if a production
+    # restores the branch. Nothing is lost while it is absent: the POG Tight
+    # and Medium muon IDs both require isPFMuon, and tightId (above) and
+    # mediumId (below) are both already applied here.
+    if hasattr(events.Muon, "isPFCand"):
+        mumask = mumask & (events.Muon.isPFCand == 1)
+    mumask = mumask & (events.Muon.mediumId == 1)
+
     return mumask
 
 
-def btag_mu_idiso(events, campaign):
+def btag_mu_idiso(events):
     mumask = (
         (abs(events.Muon.eta) < 2.4)
         & (events.Muon.tightId > 0.5)
@@ -279,10 +411,24 @@ def jet_cut(events, campaign, ptmin=180, ptmax=1e5, absetamin=0, absetamax=2.5):
 
 def MET_filters(events, campaign):
     # apply MET filter
-    metfilter = ak.ones_like(events.run, dtype=bool)
     isRealData = not hasattr(events, "genWeight")
-    for flag in met_filters[campaign]["data" if isRealData else "mc"]:
-        metfilter = events.Flag[flag] & metfilter
+
+    def flags():
+        metfilter = ak.ones_like(events.run, dtype=bool)
+        for flag in met_filters[campaign]["data" if isRealData else "mc"]:
+            metfilter = events.Flag[flag] & metfilter
+        return metfilter
+
+    # event-level flags: the same in every JES/JER shift of a chunk
+    events_id = (
+        hash(ak.to_numpy(events.luminosityBlock).tobytes()),
+        hash(ak.to_numpy(events.event).tobytes()),
+    )
+    metfilter = _cached(
+        ("met_flags", campaign, isRealData, _chunk(events), events_id), flags
+    )
+    if not ak.any((events.run >= 362433) & (events.run <= 367144)):
+        return metfilter  # ecalBadCalibFilter below is False outside these runs
     ## Flag_ecalBadCalibFilter
     badjet = (
         (events.Jet.pt > 50)
@@ -307,13 +453,195 @@ def btag_wp(jets, year, campaign, tagger, borc, wp):
     WP = wp_dict(year, campaign)
     if borc == "b":
         jet_mask = jets[f"btag{tagger}B"] > WP[tagger]["b"][wp]
-    else:
+    elif borc == "c":
         jet_mask = (jets[f"btag{tagger}CvB"] > WP[tagger]["c"][wp][1]) & (
             jets[f"btag{tagger}CvL"] > WP[tagger]["c"][wp][0]
         )
+    elif borc == "2Db":
+        jet_mask = jets[f"btag{tagger}2Dbin"] >= WP[tagger]["2D"]["b"][wp]
+    elif borc == "2Dc":
+        jet_mask = (jets[f"btag{tagger}2Dbin"] >= WP[tagger]["2D"]["c"][wp][0]) & (
+            jets[f"btag{tagger}2Dbin"] <= WP[tagger]["2D"]["c"][wp][1]
+        )
+    else:
+        raise ValueError("Invalid flavour!")
     return jet_mask
 
 
+def fineflav(jets):
+    """Fine-grained MC jet flavour (int8 per jet), Run 2 SFbc convention:
+
+    0 = b  (hadronFlavour==5, nBHadrons<=1)
+    1 = bb (hadronFlavour==5, nBHadrons>1)
+    2 = c  (hadronFlavour==4, nCHadrons<=1)
+    3 = cc (hadronFlavour==4, nCHadrons>1)
+    4 = uds (light, abs(partonFlavour) in {1,2,3})
+    5 = g   (light, partonFlavour==21)
+    6 = undefined (everything else: no gen match / PU (genJetIdx<0),
+        partonFlavour==0, light jets with stray b/c hadrons)
+
+    The genJetIdx<0 test takes precedence over all flavour tests (applied
+    as the final override below, so it always wins).
+    """
+    hflav = jets.hadronFlavour
+    nb = jets.nBHadrons
+    nc = jets.nCHadrons
+    pflav = jets.partonFlavour
+    light = (hflav == 0) & (nb == 0) & (nc == 0)
+    flav = ak.full_like(hflav, 6, dtype=np.int8)
+    flav = ak.where((hflav == 5) & (nb <= 1), 0, flav)
+    flav = ak.where((hflav == 5) & (nb > 1), 1, flav)
+    flav = ak.where((hflav == 4) & (nc <= 1), 2, flav)
+    flav = ak.where((hflav == 4) & (nc > 1), 3, flav)
+    flav = ak.where(light & (abs(pflav) >= 1) & (abs(pflav) <= 3), 4, flav)
+    flav = ak.where(light & (pflav == 21), 5, flav)
+    # no gen match (pileup) -> undefined, regardless of stored flavours
+    flav = ak.where(jets.genJetIdx < 0, 6, flav)
+    return ak.values_astype(flav, np.int8)
+
+
+def veto_lepton_collections(events, campaign):
+    """Loose lepton collections used to clean jets in the 2D SF selections
+    (Run 2 parity: mirror the DY/Wc dilepton-veto lepton definitions).
+
+    Returns (muons, electrons): muons pt>12, electrons pt>15, with the
+    prompt-MVA IDs for the NanoAODv15 campaigns and the older IDs otherwise.
+    """
+    if campaign in [
+        "Summer24",
+        "CustomSummer24",
+        "CustomSummer24UParTPaper",
+        "CustomSummer25",
+        "Winter25",
+        "Prompt25",
+    ]:  # NanoAODv15
+        muons = events.Muon[(events.Muon.pt > 12) & mu_promptmvaid(events)]
+        electrons = events.Electron[
+            (events.Electron.pt > 15) & ele_promptmvaid(events, campaign)
+        ]
+    else:
+        muons = events.Muon[(events.Muon.pt > 12) & mu_idiso(events)]
+        electrons = events.Electron[
+            (events.Electron.pt > 15) & ele_mvatightid(events, campaign)
+        ]
+    return muons, electrons
+
+
+def jet_veto_lepton_clean(events, campaign, cone=0.4):
+    """Per-jet mask: True when the jet is farther than `cone` from every
+    lepton of `veto_lepton_collections`. A None from ak.all means "no veto
+    lepton in this event" and is filled with True (the jet is clean).
+    Shared by the four 2D SF workflows so the cone and the None semantics
+    can only change in one place. Call it BEFORE reassigning events.Muon /
+    events.Electron to selected subsets.
+    """
+    try:
+        key = (
+            "jet_lepton_clean",
+            campaign,
+            cone,
+            _chunk(events),
+            _coll_fingerprint(events.Jet, ("eta", "phi")),
+            _coll_fingerprint(events.Muon),
+            _coll_fingerprint(events.Electron),
+        )
+    except Exception:
+        return _jet_veto_lepton_clean(events, campaign, cone)
+    return _cached(key, lambda: _jet_veto_lepton_clean(events, campaign, cone))
+
+
+def _jet_veto_lepton_clean(events, campaign, cone=0.4):
+    muons, electrons = veto_lepton_collections(events, campaign)
+    clean = None
+    for coll in (muons, electrons):
+        mask = ak.fill_none(
+            ak.all(
+                events.Jet.metric_table(coll) > cone,
+                axis=2,
+                mask_identity=True,
+            ),
+            True,
+            axis=-1,
+        )
+        clean = mask if clean is None else clean & mask
+    return clean
+
+
+_mapping = {
+    1: {
+        1: 0,
+        2: 0,
+        3: 0,
+        4: 0,
+        5: 0,
+        6: 0,
+        7: 0,
+        8: 0,
+    },
+    2: {
+        1: 40,
+        2: 40,
+        3: 40,
+        4: 40,
+        5: 40,
+        6: 40,
+        7: 40,
+        8: 40,
+    },
+    3: {
+        1: 41,
+        2: 41,
+        3: 41,
+        4: 41,
+        5: 41,
+        6: 41,
+        7: 41,
+        8: 41,
+    },
+    4: {
+        1: 44,
+        2: 43,
+        3: 42,
+        4: 50,
+        5: 51,
+        6: 52,
+        7: 53,
+        8: 54,
+    },
+}
+_b2D = {
+    "L": 50,
+    "M": 51,
+    "T": 52,
+}
+_c2D = {
+    "L": [40, 44],
+    "M": [41, 44],
+    "T": [42, 44],
+}
+
+# Phase4 category scheme (SFbc-2D/OptimizedWP/results/phase4_scheme_NoPIDParT.json,
+# tagger NoPIDParT). Kept alongside _mapping/_b2D/_c2D (untouched) rather than
+# replacing them -- legacy behaviour must stay bit-identical. `mapping` there
+# is taken verbatim (x = HFvLF bin 1..4, y = BvC bin 1..8 -> category code
+# 0..10). Unlike the legacy codes (40-44/50-54), phase4's codes interleave
+# columns (e.g. column x=4 uses 1,3,5,6,7,8,9,10 while x=2/x=3 use 2/4), so
+# they don't admit the same simple ">=threshold"/contiguous-range WP cuts in
+# general.
+_mapping_phase4 = {
+    1: {1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0, 7: 0, 8: 0},
+    2: {1: 2, 2: 2, 3: 2, 4: 2, 5: 2, 6: 2, 7: 2, 8: 2},
+    3: {1: 4, 2: 4, 3: 4, 4: 4, 5: 4, 6: 4, 7: 4, 8: 4},
+    4: {1: 1, 2: 3, 3: 5, 4: 6, 5: 7, 6: 8, 7: 9, 8: 10},
+}
+_jet_pt_bins = [
+    (25, 35),
+    (35, 50),
+    (50, 70),
+    (70, 90),
+    (90, 120),
+    (120, 10000),
+]
 btag_wp_dict = {
     "2016preVFP_2016preVFP-UL": {
         "UParTAK4": {
@@ -439,6 +767,16 @@ btag_wp_dict = {
                 "M": [0.160, 0.306],
                 "T": [0.492, 0.259],
             },
+            "2D": {
+                "HFvLF": np.array([0.0, 0.160, 0.332, 0.706, 1.00001]),
+                "BvC": np.array(
+                    [0.0, 0.036, 0.090, 0.260, 0.799, 0.932, 0.978, 0.993, 1.00001]
+                ),
+                "mapping": _mapping,
+                "b": _b2D,
+                "c": _c2D,
+                "jet_pt_bins": _jet_pt_bins,
+            },
         },
     },
     "2022_Summer22EE": {
@@ -488,6 +826,16 @@ btag_wp_dict = {
                 "L": [0.054, 0.182],
                 "M": [0.160, 0.304],
                 "T": [0.491, 0.258],
+            },
+            "2D": {
+                "HFvLF": np.array([0.0, 0.160, 0.332, 0.706, 1.00001]),
+                "BvC": np.array(
+                    [0.0, 0.036, 0.090, 0.260, 0.799, 0.932, 0.978, 0.993, 1.00001]
+                ),
+                "mapping": _mapping,
+                "b": _b2D,
+                "c": _c2D,
+                "jet_pt_bins": _jet_pt_bins,
             },
         },
     },
@@ -542,6 +890,16 @@ btag_wp_dict = {
                 "T": [0.434, 0.300],
                 "XT": [0.634, 0.549],
             },
+            "2D": {
+                "HFvLF": np.array([0.0, 0.144, 0.292, 0.646, 1.00001]),
+                "BvC": np.array(
+                    [0.0, 0.036, 0.078, 0.240, 0.752, 0.915, 0.972, 0.992, 1.00001]
+                ),
+                "mapping": _mapping,
+                "b": _b2D,
+                "c": _c2D,
+                "jet_pt_bins": _jet_pt_bins,
+            },
         },
     },
     "2023_Summer23BPix": {
@@ -595,6 +953,16 @@ btag_wp_dict = {
                 "T": [0.436, 0.303],
                 "XT": [0.634, 0.5552],
             },
+            "2D": {
+                "HFvLF": np.array([0.0, 0.144, 0.288, 0.640, 1.00001]),
+                "BvC": np.array(
+                    [0.0, 0.036, 0.082, 0.243, 0.742, 0.909, 0.969, 0.992, 1.00001]
+                ),
+                "mapping": _mapping,
+                "b": _b2D,
+                "c": _c2D,
+                "jet_pt_bins": _jet_pt_bins,
+            },
         },
     },
     "2024_Summer24": {
@@ -613,6 +981,60 @@ btag_wp_dict = {
                 "M": [0.291, 0.457],
                 "T": [0.650, 0.421],
                 "XT": [0.810, 0.736],
+            },
+            "2D": {
+                "HFvLF": np.array([0.000, 0.250, 0.452, 0.808, 1.000]),
+                "BvC": np.array(
+                    [0.000, 0.006, 0.017, 0.055, 0.761, 0.944, 0.985, 0.995, 1.000]
+                ),
+                "mapping": _mapping,
+                "b": _b2D,
+                "c": _c2D,
+                "jet_pt_bins": _jet_pt_bins,
+            },
+        },
+        # Trial WPs from SFbc-2D/scripts/make2DWPIntersect.py (is_predefined,
+        # --tagger NoPIDParT); no dedicated single-tag b/c WPs exist for this
+        # tagger, only the 2D scheme.
+        "NoPIDParTAK4": {
+            "2D": {
+                "HFvLF": np.array([0.000, 0.134, 0.297, 0.729, 1.000]),
+                "BvC": np.array(
+                    [0.000, 0.035, 0.095, 0.280, 0.956, 0.992, 0.998, 0.999, 1.000]
+                ),
+                "mapping": _mapping,
+                "b": _b2D,
+                "c": _c2D,
+                "jet_pt_bins": _jet_pt_bins,
+            },
+        },
+        # Phase4 category scheme (SFbc-2D/OptimizedWP study, results/
+        # phase4_scheme_NoPIDParT.json), added alongside the entry above --
+        # same underlying HFvLF/BvC scores, different category boundaries and
+        # mapping. HFvLF cuts are unchanged from legacy; 3 of 7 BvC cuts move.
+        "NoPIDParTAK4_phase4": {
+            "2D": {
+                "HFvLF": np.array([0.000, 0.134, 0.297, 0.729, 1.000]),
+                "BvC": np.array(
+                    [
+                        0.000,
+                        0.035,
+                        0.095,
+                        0.22515727366719923,
+                        0.29954950677023995,
+                        0.9006733695665995,
+                        0.992,
+                        0.999,
+                        1.000,
+                    ]
+                ),
+                "mapping": _mapping_phase4,
+                # No "b"/"c" single-WP entries: the phase4 study fits all 11
+                # categories directly (SFbc-2D writeFlavCards.py --sf-structure)
+                # and never derived L/M/T cuts on this scheme. Inventing them
+                # here would hand callers of btag_wp(..., "2Db"/"2Dc", ...) an
+                # uncalibrated working point that looks official.
+                "jet_pt_bins": _jet_pt_bins,
             },
         },
     },
@@ -633,9 +1055,25 @@ btag_wp_dict = {
                 "T": [0.650, 0.421],
                 "XT": [0.810, 0.736],
             },
+            "2D": {
+                "HFvLF": np.array([0.000, 0.250, 0.452, 0.808, 1.000]),
+                "BvC": np.array(
+                    [0.000, 0.006, 0.017, 0.055, 0.761, 0.944, 0.985, 0.995, 1.000]
+                ),
+                "mapping": _mapping,
+                "b": _b2D,
+                "c": _c2D,
+                "jet_pt_bins": _jet_pt_bins,
+            },
         },
     },
 }
+# CustomSummer24 is a private NanoAODv15 production on the same MiniAOD
+# conditions as Summer24 -- reuse its precomputed WP thresholds.
+btag_wp_dict["2024_CustomSummer24"] = btag_wp_dict["2024_Summer24"]
+btag_wp_dict["2024_CustomSummer24UParTPaper"] = btag_wp_dict["2024_Summer24"]
+# CustomSummer25 uses the CustomSummer24 MC, so the WP boundaries stay the same.
+btag_wp_dict["2025_CustomSummer25"] = btag_wp_dict["2024_CustomSummer24"]
 
 
 import os, correctionlib
@@ -937,3 +1375,8 @@ met_filters = {
         ],
     },
 }
+# CustomSummer24 is a private NanoAODv15 production on the same MiniAOD
+# conditions as Summer24 -- reuse its MET filter list.
+met_filters["CustomSummer24"] = met_filters["Summer24"]
+met_filters["CustomSummer24UParTPaper"] = met_filters["Summer24"]
+met_filters["CustomSummer25"] = met_filters["Prompt25"]

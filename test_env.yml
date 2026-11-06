@@ -14,11 +14,17 @@ dependencies:
   - psutil
   - dask
   - setuptools<=70.1.1
-  - parsl==2024.01.29
+  - parsl>=2024.12.09
   - arrow
   - dask-jobqueue
   - alive-progress
+  - numpy==1.26.4
+  - numba==0.66.0
+  - llvmlite==0.48.0
   - pip:
-    - coffea==0.7.31
+    - coffea==2026.7.0
     - correctionlib==2.7.0
     - onnxruntime
+    - awkward>=2.8.11
+    - uproot>=5.7.0
+    - fsspec-xrootd

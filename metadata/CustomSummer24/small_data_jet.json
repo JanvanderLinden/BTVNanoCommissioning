@@ -1,0 +1,67 @@
+{
+  "JetMET1Run2024H": [
+    "root://maite.iihe.ac.be:1094//store/group/CustomNanoAODv15/NanoTuples/2024/data/JetMET1/NanoTuples-uParTv3-parTlepID-NanoAODv15_Run2024H-MINIv6NANOv15-v2/260526_120234/0000/nano_82.root",
+    "root://maite.iihe.ac.be:1094//store/group/CustomNanoAODv15/NanoTuples/2024/data/JetMET1/NanoTuples-uParTv3-parTlepID-NanoAODv15_Run2024H-MINIv6NANOv15-v2/260526_120234/0000/nano_2.root",
+    "root://maite.iihe.ac.be:1094//store/group/CustomNanoAODv15/NanoTuples/2024/data/JetMET1/NanoTuples-uParTv3-parTlepID-NanoAODv15_Run2024H-MINIv6NANOv15-v2/260526_120234/0000/nano_85.root"
+  ],
+  "JetMET0Run2024I": [
+    "root://maite.iihe.ac.be:1094//store/group/CustomNanoAODv15/NanoTuples/2024/data/JetMET0/NanoTuples-uParTv3-parTlepID-NanoAODv15_Run2024I-MINIv6NANOv15-v2/260526_115537/0000/nano_418.root",
+    "root://maite.iihe.ac.be:1094//store/group/CustomNanoAODv15/NanoTuples/2024/data/JetMET0/NanoTuples-uParTv3-parTlepID-NanoAODv15_Run2024I-MINIv6NANOv15-v2/260526_115537/0000/nano_217.root",
+    "root://maite.iihe.ac.be:1094//store/group/CustomNanoAODv15/NanoTuples/2024/data/JetMET0/NanoTuples-uParTv3-parTlepID-NanoAODv15_Run2024I-MINIv6NANOv15-v2/260623_142637/0000/nano_20.root"
+  ],
+  "JetMET0Run2024H": [
+    "root://maite.iihe.ac.be:1094//store/group/CustomNanoAODv15/NanoTuples/2024/data/JetMET0/NanoTuples-uParTv3-parTlepID-NanoAODv15_Run2024H-MINIv6NANOv15-v2/260526_115427/0000/nano_236.root",
+    "root://maite.iihe.ac.be:1094//store/group/CustomNanoAODv15/NanoTuples/2024/data/JetMET0/NanoTuples-uParTv3-parTlepID-NanoAODv15_Run2024H-MINIv6NANOv15-v2/260526_115427/0000/nano_254.root",
+    "root://maite.iihe.ac.be:1094//store/group/CustomNanoAODv15/NanoTuples/2024/data/JetMET0/NanoTuples-uParTv3-parTlepID-NanoAODv15_Run2024H-MINIv6NANOv15-v2/260526_115427/0000/nano_101.root"
+  ],
+  "JetMET1Run2024I": [
+    "root://maite.iihe.ac.be:1094//store/group/CustomNanoAODv15/NanoTuples/2024/data/JetMET1/NanoTuples-uParTv3-parTlepID-NanoAODv15_Run2024I-MINIv6NANOv15-v1/260623_142026/0000/nano_47.root",
+    "root://maite.iihe.ac.be:1094//store/group/CustomNanoAODv15/NanoTuples/2024/data/JetMET1/NanoTuples-uParTv3-parTlepID-NanoAODv15_Run2024I-MINIv6NANOv15-v1/260526_132303/0000/nano_417.root",
+    "root://maite.iihe.ac.be:1094//store/group/CustomNanoAODv15/NanoTuples/2024/data/JetMET1/NanoTuples-uParTv3-parTlepID-NanoAODv15_Run2024I-MINIv6NANOv15-v1/260526_132303/0000/nano_106.root"
+  ],
+  "JetMET1Run2024C": [
+    "root://maite.iihe.ac.be:1094//store/group/CustomNanoAODv15/NanoTuples/2024/data/JetMET1/NanoTuples-uParTv3-parTlepID-NanoAODv15_Run2024C-MINIv6NANOv15-v1/260526_115648/0000/nano_59.root",
+    "root://maite.iihe.ac.be:1094//store/group/CustomNanoAODv15/NanoTuples/2024/data/JetMET1/NanoTuples-uParTv3-parTlepID-NanoAODv15_Run2024C-MINIv6NANOv15-v1/260526_115648/0000/nano_296.root",
+    "root://maite.iihe.ac.be:1094//store/group/CustomNanoAODv15/NanoTuples/2024/data/JetMET1/NanoTuples-uParTv3-parTlepID-NanoAODv15_Run2024C-MINIv6NANOv15-v1/260526_115648/0000/nano_575.root"
+  ],
+  "JetMET1Run2024D": [
+    "root://maite.iihe.ac.be:1094//store/group/CustomNanoAODv15/NanoTuples/2024/data/JetMET1/NanoTuples-uParTv3-parTlepID-NanoAODv15_Run2024D-MINIv6NANOv15-v1/260526_115800/0000/nano_614.root",
+    "root://maite.iihe.ac.be:1094//store/group/CustomNanoAODv15/NanoTuples/2024/data/JetMET1/NanoTuples-uParTv3-parTlepID-NanoAODv15_Run2024D-MINIv6NANOv15-v1/260526_115800/0000/nano_101.root",
+    "root://maite.iihe.ac.be:1094//store/group/CustomNanoAODv15/NanoTuples/2024/data/JetMET1/NanoTuples-uParTv3-parTlepID-NanoAODv15_Run2024D-MINIv6NANOv15-v1/260526_115800/0000/nano_341.root"
+  ],
+  "JetMET1Run2024E": [
+    "root://maite.iihe.ac.be:1094//store/group/CustomNanoAODv15/NanoTuples/2024/data/JetMET1/NanoTuples-uParTv3-parTlepID-NanoAODv15_Run2024E-MINIv6NANOv15-v1/260805_145927/0000/nano_35.root",
+    "root://maite.iihe.ac.be:1094//store/group/CustomNanoAODv15/NanoTuples/2024/data/JetMET1/NanoTuples-uParTv3-parTlepID-NanoAODv15_Run2024E-MINIv6NANOv15-v1/260805_145927/0000/nano_134.root",
+    "root://maite.iihe.ac.be:1094//store/group/CustomNanoAODv15/NanoTuples/2024/data/JetMET1/NanoTuples-uParTv3-parTlepID-NanoAODv15_Run2024E-MINIv6NANOv15-v1/260526_115912/0000/nano_324.root"
+  ],
+  "JetMET1Run2024F": [
+    "root://maite.iihe.ac.be:1094//store/group/CustomNanoAODv15/NanoTuples/2024/data/JetMET1/NanoTuples-uParTv3-parTlepID-NanoAODv15_Run2024F-MINIv6NANOv15-v2/260526_120020/0002/nano_2035.root",
+    "root://maite.iihe.ac.be:1094//store/group/CustomNanoAODv15/NanoTuples/2024/data/JetMET1/NanoTuples-uParTv3-parTlepID-NanoAODv15_Run2024F-MINIv6NANOv15-v2/260526_120020/0001/nano_1543.root",
+    "root://maite.iihe.ac.be:1094//store/group/CustomNanoAODv15/NanoTuples/2024/data/JetMET1/NanoTuples-uParTv3-parTlepID-NanoAODv15_Run2024F-MINIv6NANOv15-v2/260526_120020/0002/nano_2088.root"
+  ],
+  "JetMET0Run2024C": [
+    "root://storage01.lcg.cscs.ch:1096//pnfs/lcg.cscs.ch/cms/trivcat/store/group/cmst3/group/hplushf/NanoTuples/2024/data/JetMET0/NanoTuples-uParTv3-parTlepID-NanoAODv15_Run2024C-MINIv6NANOv15-v1/260526_133015/0000/nano_225.root",
+    "root://storage01.lcg.cscs.ch:1096//pnfs/lcg.cscs.ch/cms/trivcat/store/group/cmst3/group/hplushf/NanoTuples/2024/data/JetMET0/NanoTuples-uParTv3-parTlepID-NanoAODv15_Run2024C-MINIv6NANOv15-v1/260526_133015/0000/nano_475.root",
+    "root://storage01.lcg.cscs.ch:1096//pnfs/lcg.cscs.ch/cms/trivcat/store/group/cmst3/group/hplushf/NanoTuples/2024/data/JetMET0/NanoTuples-uParTv3-parTlepID-NanoAODv15_Run2024C-MINIv6NANOv15-v1/260526_133015/0000/nano_532.root"
+  ],
+  "JetMET1Run2024G": [
+    "root://maite.iihe.ac.be:1094//store/group/CustomNanoAODv15/NanoTuples/2024/data/JetMET1/NanoTuples-uParTv3-parTlepID-NanoAODv15_Run2024G-MINIv6NANOv15-v2/260526_120127/0001/nano_1592.root",
+    "root://maite.iihe.ac.be:1094//store/group/CustomNanoAODv15/NanoTuples/2024/data/JetMET1/NanoTuples-uParTv3-parTlepID-NanoAODv15_Run2024G-MINIv6NANOv15-v2/260526_120127/0003/nano_3002.root",
+    "root://maite.iihe.ac.be:1094//store/group/CustomNanoAODv15/NanoTuples/2024/data/JetMET1/NanoTuples-uParTv3-parTlepID-NanoAODv15_Run2024G-MINIv6NANOv15-v2/260526_120127/0001/nano_1057.root"
+  ],
+  "JetMET0Run2024G": [
+    "root://maite.iihe.ac.be:1094//store/group/CustomNanoAODv15/NanoTuples/2024/data/JetMET0/NanoTuples-uParTv3-parTlepID-NanoAODv15_Run2024G-MINIv6NANOv15-v2/260526_115317/0002/nano_2005.root",
+    "root://maite.iihe.ac.be:1094//store/group/CustomNanoAODv15/NanoTuples/2024/data/JetMET0/NanoTuples-uParTv3-parTlepID-NanoAODv15_Run2024G-MINIv6NANOv15-v2/260805_145824/0000/nano_330.root",
+    "root://maite.iihe.ac.be:1094//store/group/CustomNanoAODv15/NanoTuples/2024/data/JetMET0/NanoTuples-uParTv3-parTlepID-NanoAODv15_Run2024G-MINIv6NANOv15-v2/260526_115317/0004/nano_4026.root"
+  ],
+  "JetMET0Run2024E": [
+    "root://storage01.lcg.cscs.ch:1096//pnfs/lcg.cscs.ch/cms/trivcat/store/group/cmst3/group/hplushf/NanoTuples/2024/data/JetMET0/NanoTuples-uParTv3-parTlepID-NanoAODv15_Run2024E-MINIv6NANOv15-v1/260526_133132/0000/nano_981.root",
+    "root://storage01.lcg.cscs.ch:1096//pnfs/lcg.cscs.ch/cms/trivcat/store/group/cmst3/group/hplushf/NanoTuples/2024/data/JetMET0/NanoTuples-uParTv3-parTlepID-NanoAODv15_Run2024E-MINIv6NANOv15-v1/260526_133132/0001/nano_1223.root",
+    "root://storage01.lcg.cscs.ch:1096//pnfs/lcg.cscs.ch/cms/trivcat/store/group/cmst3/group/hplushf/NanoTuples/2024/data/JetMET0/NanoTuples-uParTv3-parTlepID-NanoAODv15_Run2024E-MINIv6NANOv15-v1/260526_133132/0000/nano_544.root"
+  ],
+  "JetMET0Run2024F": [
+    "root://storage01.lcg.cscs.ch:1096//pnfs/lcg.cscs.ch/cms/trivcat/store/group/cmst3/group/hplushf/NanoTuples/2024/data/JetMET0/NanoTuples-uParTv3-parTlepID-NanoAODv15_Run2024F-MINIv6NANOv15-v2/260526_133211/0001/nano_1439.root",
+    "root://storage01.lcg.cscs.ch:1096//pnfs/lcg.cscs.ch/cms/trivcat/store/group/cmst3/group/hplushf/NanoTuples/2024/data/JetMET0/NanoTuples-uParTv3-parTlepID-NanoAODv15_Run2024F-MINIv6NANOv15-v2/260526_133211/0000/nano_563.root",
+    "root://storage01.lcg.cscs.ch:1096//pnfs/lcg.cscs.ch/cms/trivcat/store/group/cmst3/group/hplushf/NanoTuples/2024/data/JetMET0/NanoTuples-uParTv3-parTlepID-NanoAODv15_Run2024F-MINIv6NANOv15-v2/260526_133211/0000/nano_524.root"
+  ]
+}

@@ -1,4 +1,5 @@
 import copy
+import math
 import hist
 from coffea.processor import accumulate
 import os
@@ -24,7 +25,31 @@ def scale_xs(hist, lumi, events):
     return hist
 
 
-def scaleSumW(output, lumi, syst_shapes=True):
+def _renormalise_syst_slices(h, factors):
+    """Multiply each `syst`-axis slice whose label is in `factors` by that factor
+    (value by f, variance by f^2), in place. Slices not listed -- detector
+    shifts, SF variations, the nominal -- are left as they are."""
+    if "syst" not in h.axes.name:
+        return h
+    iax = h.axes.name.index("syst")
+    ax = h.axes["syst"]
+    view = h.view(flow=True)
+    for label in ax:
+        f = factors.get(label)
+        if f is None or f == 1.0:
+            continue
+        sl = [slice(None)] * h.ndim
+        sl[iax] = ax.index(label)
+        sl = tuple(sl)
+        if view.dtype.names and "variance" in view.dtype.names:
+            view["value"][sl] *= f
+            view["variance"][sl] *= f * f
+        else:
+            view[sl] *= f
+    return h
+
+
+def scaleSumW(output, lumi, syst_shapes=True, variables=None):
     scaled = {}
     xs_dict = {}
     for obj in xsection + xsection_13TeV:
@@ -49,6 +74,12 @@ def scaleSumW(output, lumi, syst_shapes=True):
         "UEPS_ISRDown": "ISR_sumwDown",
         "UEPS_FSRUp": "FSR_sumwUp",
         "UEPS_FSRDown": "FSR_sumwDown",
+        "ttbar_weightUp": "ttbar_weight_sumwUp",
+        "ttbar_weightDown": "ttbar_weight_sumwDown",
+        "PDFaS_weightUp": "PDFaS_sumwUp",
+        "PDFaS_weightDown": "PDFaS_sumwDown",
+        "scalevar_muR_muFUp": "muR_muF_sumwUp",
+        "scalevar_muR_muFDown": "muR_muF_sumwDown",
     }
 
     merged_output = merge_output(output)
@@ -59,43 +90,95 @@ def scaleSumW(output, lumi, syst_shapes=True):
         for sample, accu in merged_output.items():
             scaled[sample] = {}
             if "sumw" not in accu.keys():
+                bar()
                 continue
+            scaled[sample]["sumw"] = merged_output[sample]["sumw"]
+            # New outputs carry one sum per generator-level variation
+            # (`sumw_<variation>`, correction.reweighting). Then EVERY such
+            # variation is renormalised to its own inclusive sum, slice by slice
+            # on the `syst` axis, and no per-syst companion histograms are needed.
+            var_sumw = {
+                k[len("sumw_"):]: v
+                for k, v in accu.items()
+                if isinstance(k, str) and k.startswith("sumw_")
+            }
+            for k, v in var_sumw.items():
+                scaled[sample][f"sumw_{k}"] = v
+
+            # Per-sample setup done once (NOT once per histogram key): the sum-of-
+            # weights accumulators are per-sample scalars, so collecting them inside
+            # the key loop repeated the work ~200x and spammed the warnings.
+            is_mc = sample in xs_dict
+            if is_mc:
+                xs = xs_dict[sample] * lumi
+                nominal_sumw = merged_output[sample]["sumw"]
+            if is_mc and not var_sumw:
+                # legacy outputs: per-syst sumw accumulators (fall back to nominal)
+                for syst in [
+                    "PDF",
+                    "aS",
+                    "PDFaS",
+                    "muR",
+                    "muF",
+                    "ISR",
+                    "FSR",
+                    "ttbar_weight",
+                    "muR_muF",
+                ]:
+                    for var in ["Up", "Down"]:
+                        key_reweight = f"{syst}_sumw{var}"
+                        if key_reweight in merged_output[sample].keys():
+                            scaled[sample][key_reweight] = merged_output[sample][
+                                key_reweight
+                            ]
+                        else:
+                            scaled[sample][key_reweight] = nominal_sumw
+                            print(f"WARNING: {key_reweight} not found!")
+
             for key, h_obj in accu.items():
-                scaled[sample]["sumw"] = merged_output[sample]["sumw"]
                 if not isinstance(h_obj, hist.Hist):
                     continue
 
-                if sample in xs_dict.keys():
-                    xs = xs_dict[sample] * lumi
-                    nominal_sumw = merged_output[sample]["sumw"]
-
-                    # Collect per-syst sumw accumulators (fall back to nominal if missing)
-                    for syst in ["PDF", "aS", "PDFaS", "muR", "muF", "ISR", "FSR"]:
-                        for var in ["Up", "Down"]:
-                            key_reweight = f"{syst}_sumw{var}"
-                            if key_reweight in merged_output[sample].keys():
-                                scaled[sample][key_reweight] = merged_output[sample][
-                                    key_reweight
-                                ]
-                            else:
-                                scaled[sample][key_reweight] = nominal_sumw
-                                print(f"WARNING: {key_reweight} not found!")
-
-                    scaled[sample][key] = copy.deepcopy(h_obj) * xs / nominal_sumw
-
-                    for suffix, sumw_key in syst_sumw_map.items():
-                        sumw = scaled[sample][sumw_key] if syst_shapes else nominal_sumw
-                        scaled[sample][f"{key}_{suffix}"] = (
-                            copy.deepcopy(h_obj) * xs / sumw
+                if is_mc and var_sumw:
+                    h = h_obj * xs / nominal_sumw
+                    if syst_shapes:
+                        _renormalise_syst_slices(
+                            h,
+                            {
+                                label: nominal_sumw / s
+                                for label, s in var_sumw.items()
+                                if math.isfinite(s) and s != 0
+                            },
                         )
+                    scaled[sample][key] = h
+                elif is_mc:
+                    # legacy outputs without `sumw_<variation>`
+                    scaled[sample][key] = h_obj * xs / nominal_sumw
+
+                    # Per-syst renormalised copies are only ever read for the
+                    # variables actually plotted; building them for every one of
+                    # the ~200 histogram keys is what makes scaleSumW run out of
+                    # memory. `variables=None` keeps the old all-keys behaviour.
+                    if variables is None or key in variables:
+                        for suffix, sumw_key in syst_sumw_map.items():
+                            sumw = (
+                                scaled[sample][sumw_key]
+                                if syst_shapes
+                                else nominal_sumw
+                            )
+                            # A present-but-zero (or non-finite) varied sumw is as
+                            # useless as a missing one -- dividing by it yields NaN
+                            # that poisons the collated MC. Fall back to nominal.
+                            if not math.isfinite(sumw) or sumw == 0:
+                                sumw = nominal_sumw
+                            scaled[sample][f"{key}_{suffix}"] = h_obj * xs / sumw
+                elif ("data" in sample) or ("Run" in sample) or ("Double" in sample):
+                    scaled[sample][key] = copy.deepcopy(h_obj)
                 else:
-                    if ("data" in sample) or ("Run" in sample) or ("Double" in sample):
-                        scaled[sample][key] = copy.deepcopy(h_obj)
-                    else:
-                        raise KeyError(
-                            sample,
-                            "is not found in xsection.py. If you're using 13TeV samples, please use xsection_13TeV.py",
-                        )
+                    raise KeyError(
+                        sample,
+                        "is not found in xsection.py. If you're using 13TeV samples, please use xsection_13TeV.py",
+                    )
             bar()
     return scaled
 

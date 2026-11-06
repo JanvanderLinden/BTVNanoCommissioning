@@ -1,7 +1,154 @@
+import itertools
+
 import awkward as ak
 import numpy as np
 from BTVNanoCommissioning.helpers.func import flatten
 from .hist_helpers import get_hist_collections, get_axes_collections
+from .histograms.sf2d import SCHEMES as SF2D_SCHEMES
+from .histograms.sf2d import TAG_LADDER_THRESHOLDS, TAG_SEL_CODES
+
+
+def _logit(x):
+    # scores outside (0, 1) (defaults, jets outside a pT bin) go to underflow
+    ok = (x > 0) & (x < 1)
+    xs = ak.where(ok, x, 0.5)
+    return ak.where(ok, np.log(xs / (1.0 - xs)), -999.0)
+
+
+SYST_TOKEN = "__syst__"
+
+
+class _FillRecorder:
+    def __init__(self, name, hist, calls):
+        self.name, self.hist, self.calls = name, hist, calls
+
+    def fill(self, *args, **kwargs):
+        self.calls.append((self.name, self.hist, args, kwargs))
+
+
+def _to_numpy(x):
+    if isinstance(x, ak.Array):
+        try:
+            return ak.to_numpy(x)
+        except Exception:
+            return x
+    return x
+
+
+def _is_token(x):
+    if isinstance(x, str):
+        return x == SYST_TOKEN
+    return (
+        isinstance(x, np.ndarray)
+        and x.dtype.kind in "USO"
+        and (len(x) == 0 or x[0] == SYST_TOKEN)
+    )
+
+
+def replay_fills(output, fill_all, systematics, weight_for, n_events, skip=None):
+    """Fill all histograms for all weight variations at the cost of one pass.
+
+    fill_all(output, weight, syst) runs the fill code once with weight = event
+    index and syst = SYST_TOKEN; every fill call is recorded. The calls are then
+    repeated per variation with weight = weight_for(syst)[index] and the real
+    syst label, in the original order, so the histograms are identical. Valid
+    only if fill_all uses the weight just for indexing/masking/broadcasting."""
+    calls = []
+    fill_all(
+        {k: _FillRecorder(k, h, calls) for k, h in output.items()},
+        np.arange(n_events, dtype=np.float64),
+        SYST_TOKEN,
+    )
+    rec = []
+    for name, h, args, kwargs in calls:
+        kw = {k: _to_numpy(v) for k, v in kwargs.items()}
+        idx = kw.pop("weight", None)
+        if idx is not None:
+            idx = np.asarray(idx).astype(np.int64)
+        args = [_to_numpy(a) for a in args]
+        # a scalar label is ~10x faster to fill than an array of labels; it needs
+        # one non-empty array argument to broadcast against (else keep the array)
+        scalar = any(
+            isinstance(x, np.ndarray) and not _is_token(x) and x.ndim and len(x)
+            for x in (*args, *kw.values())
+        )
+        rec.append((name, h, args, kw, idx, scalar))
+    for syst in systematics:
+        w = weight_for(syst)
+        for name, h, args, kw, idx, scalar in rec:
+            if skip is not None and skip(name, syst):
+                continue
+            sub = lambda x: (
+                (
+                    np.full(len(x), syst)
+                    if isinstance(x, np.ndarray) and not scalar
+                    else syst
+                )
+                if _is_token(x)
+                else x
+            )
+            a = [sub(x) for x in args]
+            k = {key: sub(v) for key, v in kw.items()}
+            if idx is None:
+                h.fill(*a, **k)
+            else:
+                h.fill(*a, weight=w[idx], **k)
+
+
+def _fill_sf2d_histograms(output, seljets, genflavor, weight, syst):
+    """Fill the SF-fit template histograms (histograms/sf2d.py): tag category
+    x jet pT x SV variable, once per (2D scheme, SV variant) combination
+    present in `output`. Both `seljets` and `genflavor` are already jagged
+    per-jet (one entry per SelJet), so no broadcasting is needed for those --
+    only `weight` (one entry per event) needs broadcasting up to per-jet.
+
+    An svmass template is filled only where one was booked, which is the
+    channel's own declaration that SelJet_svmass is trustworthy there (see
+    histograms/sf2d.py). `svmass` has no cone cut -- it is the mass of the
+    closest SV *in the event*, not necessarily this jet's -- so a jet with
+    nSVs == 0 can still carry a borrowed non-negative mass. The joint gate is
+    applied here: svmass is forced to -1 (bin 0 on the variable axis) wherever
+    nSVs == 0, regardless of what SelJet.svmass itself holds.
+    """
+    flat_pt = flatten(seljets["pt"])
+    if len(flat_pt) == 0:
+        return
+    flat_flav = flatten(genflavor)
+    flat_weight = flatten(ak.broadcast_arrays(weight, seljets["pt"])[0])
+    flat_syst = np.full(len(flat_pt), syst[0])
+
+    for scheme, (branch, _codes) in SF2D_SCHEMES.items():
+        if branch not in seljets.fields:
+            continue
+        flat_tagcat = flatten(seljets[branch])
+
+        nsv_name = f"sf2d_{scheme}_nSVs"
+        if nsv_name in output and "nSVs" in seljets.fields:
+            output[nsv_name].fill(
+                syst=flat_syst,
+                flav=flat_flav,
+                tagcat=flat_tagcat,
+                pt=flat_pt,
+                nSVs=flatten(seljets.nSVs),
+                weight=flat_weight,
+            )
+
+        svmass_name = f"sf2d_{scheme}_svmass"
+        if (
+            svmass_name in output
+            and "svmass" in seljets.fields
+            and "nSVs" in seljets.fields
+        ):
+            flat_nsv = flatten(seljets.nSVs)
+            flat_svmass = np.where(flat_nsv == 0, -1.0, flatten(seljets.svmass))
+            output[svmass_name].fill(
+                syst=flat_syst,
+                flav=flat_flav,
+                tagcat=flat_tagcat,
+                pt=flat_pt,
+                svmass=flat_svmass,
+                weight=flat_weight,
+            )
 
 
 def histogrammer(
@@ -85,14 +232,17 @@ def histo_writter(pruned_ev, output, weights, systematics, isSyst, SF_map):
 
     # Reduce the jet to the correct dimension in the plot
     found4jets = False
+    found3jets = False
     found2jets = False
     for key in output.keys():
         if "jet3" in key:  # Because 0-indexing
             found4jets = True
             break
+        if "jet2" in key:  # Because 0-indexing
+            found3jets = True
         if "jet1" in key:  # Because 0-indexing
             found2jets = True
-    nj = 4 if found4jets else 2 if found2jets else 1
+    nj = 4 if found4jets else 3 if found3jets else 2 if found2jets else 1
     if nj != 1:
         pruned_ev["SelJet"] = pruned_ev.SelJet[:, :nj]
     if "var" in str(ak.type(pruned_ev.SelJet.pt)) and nj == 1:
@@ -125,20 +275,28 @@ def histo_writter(pruned_ev, output, weights, systematics, isSyst, SF_map):
         if "MuonJet" in pruned_ev.fields:
             smflav = ak.zeros_like(pruned_ev.MuonJet.pt, dtype=int)
 
-    # Loop over the systematic variations
-    for syst in systematics:
-        if isSyst == False and syst != "nominal":
-            break
-        # Weight modifications for systematics
-        weight = (
-            weights.weight()
-            if syst == "nominal" or syst not in list(weights.variations)
-            else weights.weight(modifier=syst)
-        )
-        syst_perjet = syst
-        syst = np.full(len(weight), syst)
+    # Fill code for one systematic variation
+    def _fill_all(output, weight, syst_perjet):
+        nonlocal nj
+        syst = np.full(len(weight), syst_perjet)
+        jet_i = {}
+
+        def _jet_i(i):
+            # jet i of the events with >= i+1 SelJets, with its flavour, weight and syst label (once per pass)
+            if i not in jet_i:
+                m = ak.count(pruned_ev.SelJet["pt"], axis=1) >= (i + 1)
+                jet_i[i] = (
+                    pruned_ev.SelJet[m][:, i],
+                    genflavor[m][:, i],
+                    weight[m],
+                    syst[m],
+                )
+            return jet_i[i]
+
         # Loop over the histograms
         for histname, h in output.items():
+            if "_logit_" in histname and syst_perjet not in ("nominal", SYST_TOKEN):
+                continue
             # Tagger score histograms
             if (
                 "Deep" in histname
@@ -259,8 +417,45 @@ def histo_writter(pruned_ev, output, weights, systematics, isSyst, SF_map):
                     flatten(pruned_ev.SoftMuon[histname.replace("soft_l_", "")]),
                     weight=weight,
                 )
+            elif "norm" == histname:
+                output["norm"].fill(syst, weight=weight)
             elif "njet" == histname:
                 output["njet"].fill(syst, pruned_ev.njet, weight=weight)
+            elif histname.startswith("tag_ladder_"):
+                scheme = histname[len("tag_ladder_") :]
+                branch, _codes = SF2D_SCHEMES.get(scheme, (None, None))
+                if branch is not None and branch in pruned_ev.SelJet.fields:
+                    jetcat = pruned_ev.SelJet[branch]
+                    for thr in TAG_LADDER_THRESHOLDS:
+                        codes = TAG_SEL_CODES[scheme].get(thr)
+                        if codes is None:
+                            continue
+                        mask = ak.zeros_like(jetcat, dtype=bool)
+                        for code in codes:
+                            mask = mask | (jetcat == code)
+                        count = ak.to_numpy(ak.sum(mask, axis=1))
+                        output[histname].fill(
+                            syst=syst,
+                            threshold=np.full(len(count), thr),
+                            count=count,
+                            weight=weight,
+                        )
+            elif "nbjet" == histname:
+                output["nbjet"].fill(syst, pruned_ev.nbjet, weight=weight)
+            elif "ncjet" == histname:
+                output["ncjet"].fill(syst, pruned_ev.ncjet, weight=weight)
+            elif "top_pt" == histname and "TT" in pruned_ev.metadata["dataset"]:
+                top_mask = (pruned_ev.GenPart.pdgId == 6) & pruned_ev.GenPart.hasFlags(
+                    ["isLastCopy"]
+                )
+                top_pt = pruned_ev.GenPart[top_mask][:, 0].pt
+                output["top_pt"].fill(syst, top_pt, weight=weight)
+            elif "antitop_pt" == histname and "TT" in pruned_ev.metadata["dataset"]:
+                antitop_mask = (
+                    pruned_ev.GenPart.pdgId == -6
+                ) & pruned_ev.GenPart.hasFlags(["isLastCopy"])
+                antitop_pt = pruned_ev.GenPart[antitop_mask][:, 0].pt
+                output["antitop_pt"].fill(syst, antitop_pt, weight=weight)
             elif "npv" == histname:
                 output["npv"].fill(syst, pruned_ev.PV.npvsGood, weight=weight)
             # Jet kinematics & deltaR between jet and lepton
@@ -271,23 +466,28 @@ def histo_writter(pruned_ev, output, weights, systematics, isSyst, SF_map):
                     if f"jet{i}" not in histname:
                         continue
                     if nj == 1:
-                        sel_jet, flav = pruned_ev.SelJet, genflavor
+                        sel_jet, flav, wgt, temp_syst = (
+                            pruned_ev.SelJet,
+                            genflavor,
+                            weight,
+                            syst,
+                        )
                     else:
-                        sel_jet, flav = pruned_ev.SelJet[:, i], genflavor[:, i]
+                        sel_jet, flav, wgt, temp_syst = _jet_i(i)
                     if str(i) in histname:
                         if "dr_mujet" in histname:
                             h.fill(
-                                syst,
+                                temp_syst,
                                 flatten(flav),
                                 flatten(sel_jet.delta_r(pruned_ev.SelMuon)),
-                                weight=weight,
+                                weight=wgt,
                             )
                         else:
                             h.fill(
-                                syst,
+                                temp_syst,
                                 flatten(flav),
                                 flatten(sel_jet[histname.replace(f"jet{i}_", "")]),
-                                weight=weight,
+                                weight=wgt,
                             )
                 # fill negatively tagged jets, and inclusive jets, binned in pt
                 if histname.endswith("_negtag_jet_pt"):
@@ -346,16 +546,48 @@ def histo_writter(pruned_ev, output, weights, systematics, isSyst, SF_map):
                     for i in range(nj):
                         if not histname.endswith(str(i)):
                             continue
-                        if nj > 1:
-                            flav, seljet = flavs[:, i], seljets[:, i]
+                        if nj > 1 and "MuonJet" not in pruned_ev.fields:
+                            seljet, flav, wgt, fsyst = _jet_i(i)
+                        elif nj > 1:
+                            # not every event has >=(i+1) jets (e.g. DY with
+                            # up to 3 jets stored, but not guaranteed 3/event)
+                            mask_njets = ak.count(seljets.pt, axis=1) >= (i + 1)
+                            temp_flavs = flavs[mask_njets]
+                            temp_seljets = seljets[mask_njets]
+                            temp_weight = weight[mask_njets]
+                            temp_syst = syst[mask_njets]
+                            flav, seljet, wgt, fsyst = (
+                                temp_flavs[:, i],
+                                temp_seljets[:, i],
+                                temp_weight,
+                                temp_syst,
+                            )
                         else:
-                            flav, seljet = flavs, seljets
-                        h.fill(
-                            syst=syst,
-                            flav=flav,
-                            discr=seljet[histname.replace(f"_{i}", "")],
-                            weight=weight,
-                        )
+                            flav, seljet, wgt, fsyst = flavs, seljets, weight, syst
+                        field = histname.replace(f"_{i}", "")
+                        if field.startswith("btagVs_"):
+                            _, t1, t2, d, _ = field.split("_")
+                            h.fill(
+                                syst=fsyst,
+                                flav=flav,
+                                t1=_logit(seljet[f"btag{t1}{d}"]),
+                                t2=_logit(seljet[f"btag{t2}{d}"]),
+                                weight=wgt,
+                            )
+                        elif field.endswith("_logit"):
+                            h.fill(
+                                syst=fsyst,
+                                flav=flav,
+                                discr=_logit(seljet[field[: -len("_logit")]]),
+                                weight=wgt,
+                            )
+                        else:
+                            h.fill(
+                                syst=fsyst,
+                                flav=flav,
+                                discr=seljet[field],
+                                weight=wgt,
+                            )
                 elif histname in seljets.fields:
                     # No jet index suffix (nj=1) - fill directly
                     discr = seljets[histname]
@@ -373,17 +605,24 @@ def histo_writter(pruned_ev, output, weights, systematics, isSyst, SF_map):
             output["dr_poslnegl"].fill(
                 syst, pruned_ev.posl.delta_r(pruned_ev.negl), weight=weight
             )
+            # SelJet may hold a variable number of jets/event (e.g. DY
+            # storing up to 3 jets), so the per-jet dr/flavor arrays are
+            # ragged and must be flattened before filling
+            dr_posl = pruned_ev.posl.delta_r(pruned_ev.SelJet)
+            flat_dr_posl = flatten(dr_posl)
             output["dr_posljet"].fill(
-                syst,
-                genflavor,
-                pruned_ev.posl.delta_r(pruned_ev.SelJet),
-                weight=weight,
+                np.full(len(flat_dr_posl), syst[0]),
+                flatten(genflavor),
+                flat_dr_posl,
+                weight=flatten(ak.broadcast_arrays(weight, dr_posl)[0]),
             )
+            dr_negl = pruned_ev.negl.delta_r(pruned_ev.SelJet)
+            flat_dr_negl = flatten(dr_negl)
             output["dr_negljet"].fill(
-                syst,
-                genflavor,
-                pruned_ev.negl.delta_r(pruned_ev.SelJet),
-                weight=weight,
+                np.full(len(flat_dr_negl), syst[0]),
+                flatten(genflavor),
+                flat_dr_negl,
+                weight=flatten(ak.broadcast_arrays(weight, dr_negl)[0]),
             )
 
         # Muon enriched jet histograms
@@ -463,10 +702,25 @@ def histo_writter(pruned_ev, output, weights, systematics, isSyst, SF_map):
             output["dilep_mass"].fill(
                 syst, flatten(pruned_ev.dilep.mass), weight=weight
             )
+            if "dilep_ptratio" in output.keys():
+                # SelJet may hold a variable number of jets/event, so the
+                # per-jet ratio/flavor arrays are ragged and must be
+                # flattened (and syst/weight broadcast per-jet) before filling
+                ratio = pruned_ev.dilep.pt / pruned_ev.SelJet.pt
+                flat_ratio = flatten(ratio)
+                output["dilep_ptratio"].fill(
+                    np.full(len(flat_ratio), syst[0]),
+                    flatten(genflavor),
+                    flat_ratio,
+                    weight=flatten(ak.broadcast_arrays(weight, ratio)[0]),
+                )
 
         if "MET_pt" in output.keys():
             output["MET_pt"].fill(syst, flatten(pruned_ev.MET.pt), weight=weight)
             output["MET_phi"].fill(syst, flatten(pruned_ev.MET.phi), weight=weight)
+
+        if "w_mt" in pruned_ev.fields:
+            output["w_mt"].fill(syst, flatten(pruned_ev.w_mt), weight=weight)
 
         # ttbar dilepton kin workflow
         if "kindisc" in output.keys():
@@ -571,4 +825,36 @@ def histo_writter(pruned_ev, output, weights, systematics, isSyst, SF_map):
                 weight=flatten(ak.broadcast_arrays(weight, pruned_ev.j2ll_dphi)[0]),
             )
 
+        # SF-fit templates (Task A4/histograms/sf2d.py), shared by every
+        # workflow that calls histo_writer (DY, ttdilep, ...). W+c fills
+        # these itself alongside its other inline histograms instead, since
+        # it doesn't go through histo_writer.
+        if any(k.startswith("sf2d_") for k in output.keys()):
+            _fill_sf2d_histograms(output, pruned_ev.SelJet, genflavor, weight, syst)
+
+    variations = set(weights.variations)
+
+    def weight_for(syst):
+        if syst == "nominal" or syst not in variations:
+            return weights.weight()
+        return weights.weight(modifier=syst)
+
+    systs = list(
+        itertools.takewhile(
+            lambda s: not (isSyst == False and s != "nominal"), systematics
+        )
+    )
+    if "MuonJet" in pruned_ev.fields:
+        # the btag branch sets nj = 1 for all later histograms and variations: keep the plain loop
+        for syst in systs:
+            _fill_all(output, weight_for(syst), syst)
+    else:
+        replay_fills(
+            output,
+            _fill_all,
+            systs,
+            weight_for,
+            len(weights.weight()),
+            skip=lambda name, syst: "_logit_" in name and syst != "nominal",
+        )
     return output

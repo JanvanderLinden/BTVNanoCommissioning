@@ -27,6 +27,12 @@ hadd all outputs using
 python condor_lxplus/haddoutputs.py <job_output_dir>
 ```
 
+After normalizing (`condor_lxplus/normalizeArrays.py`, adds a final per-event `weight` branch),
+merge all datasets into one MC.root and one data.root per systematic using
+```
+python condor_lxplus/haddFinal.py <output_dir> --mc <hadd_normalized_dir> [<hadd_normalized_dir> ...] --data <hadd_normalized_dir> [...]
+```
+
 
 ## Pros
 - This is likely faster and will run out of the box.

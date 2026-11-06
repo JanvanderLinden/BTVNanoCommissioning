@@ -1,5 +1,4 @@
-import awkward as ak
-import numpy as np
+import awkward as ak, numpy as np
 from coffea import processor
 
 from BTVNanoCommissioning.utils.correction import (
@@ -9,7 +8,13 @@ from BTVNanoCommissioning.utils.correction import (
     common_shifts,
     reweighting,
 )
-from BTVNanoCommissioning.helpers.func import update, dump_lumi, PFCand_link
+from BTVNanoCommissioning.helpers.func import (
+    accumulate_shifts,
+    update,
+    dump_lumi,
+    PFCand_link,
+    SV_link_ragged,
+)
 from BTVNanoCommissioning.helpers.update_branch import missing_branch
 from BTVNanoCommissioning.utils.histogramming.histograms.qgtag import qg_writer
 from BTVNanoCommissioning.utils.histogramming.histogrammer import (
@@ -20,9 +25,13 @@ from BTVNanoCommissioning.utils.array_writer import array_writer
 from BTVNanoCommissioning.utils.selection import (
     HLT_helper,
     jet_id,
+    mu_promptmvaid,
+    ele_promptmvaid,
     mu_idiso,
     ele_mvatightid,
     MET_filters,
+    fineflav,
+    jet_veto_lepton_clean,
 )
 
 
@@ -36,6 +45,7 @@ class NanoProcessor(processor.ProcessorABC):
         isArray=False,
         noHist=False,
         chunksize=75000,
+        ttbar_reweights="none",
         selectionModifier="DYM_ctag",
     ):
         self._year = year
@@ -46,20 +56,26 @@ class NanoProcessor(processor.ProcessorABC):
         self.noHist = noHist
         self.lumiMask = load_lumi(self._campaign)
         self.chunksize = chunksize
+        self.ttbar_reweights = ttbar_reweights
         self.selMod = selectionModifier
         # Load corrections
-        self.SF_map = load_SF(self._year, self._campaign)
+        self.SF_map = load_SF(self._year, self._campaign, self.selMod)
 
     @property
     def accumulator(self):
         return self._accumulator
 
     def process(self, events):
-        events = missing_branch(events)
-        sumws = reweighting(events, self.isSyst)
+        events = missing_branch(events, f"{self._year}_{self._campaign}")
+        sumws = reweighting(
+            events,
+            self.isSyst,
+            ttbar_reweights=self.ttbar_reweights,
+            campaign=self._campaign,
+        )
         vetoed_events, shifts = common_shifts(self, events)
 
-        return processor.accumulate(
+        return accumulate_shifts(
             self.process_shift(update(vetoed_events, collections), sumws, name)
             for collections, name in shifts
         )
@@ -79,15 +95,28 @@ class NanoProcessor(processor.ProcessorABC):
         else:
             raise ValueError(self.selMod, "is not a valid selection modifier.")
 
-        histname = {"DYM": "ctag_DY_sf", "DYE": "ectag_DY_sf"}
+        hists = ["common", "fourvec", "DY"]
+        obj_list = ["posl", "negl", "dilep", "jet0"]
+        njet_hist = 1
+        if "2D" in self.selMod:
+            hists.append("DY_2D")
+            hists.append("SF2D")
+            # also histogram jet1, jet2 (with tagging categories) so they
+            # can be used as additional categories in the global SF fit
+            obj_list = obj_list + ["jet1", "jet2"]
+            njet_hist = 3
         output = {}
         if not self.noHist:
             if "QG" not in self.selMod:
                 output = histogrammer(
                     jet_fields=events.Jet.fields,
-                    obj_list=["posl", "negl", "dilep", "jet0"],
-                    hist_collections=["common", "fourvec", "DY"],
+                    obj_list=obj_list,
+                    hist_collections=hists,
                     include_m=isMu,
+                    njet=njet_hist,
+                    # DY is the only channel where SelJet_svmass is valid in the
+                    # current trees; see histograms/sf2d.py.
+                    sf2d_svmass=True,
                 )
             else:
                 output = histogrammer(
@@ -100,25 +129,8 @@ class NanoProcessor(processor.ProcessorABC):
 
         if shift_name is None:
             output["sumw"] = sumws["sumw"]
-            if not isRealData and self.isSyst:
-                if "LHEPdfWeight" in events.fields:
-                    output["PDF_sumwUp"] = sumws["PDF_sumwUp"]
-                    output["PDF_sumwDown"] = sumws["PDF_sumwDown"]
-                    output["aS_sumwUp"] = sumws["aS_sumwUp"]
-                    output["aS_sumwDown"] = sumws["aS_sumwDown"]
-                    output["PDFaS_sumwUp"] = sumws["PDFaS_sumwUp"]
-                    output["PDFaS_sumwDown"] = sumws["PDFaS_sumwDown"]
-                if "LHEScaleWeight" in events.fields:
-                    output["muR_sumwUp"] = sumws["muR_sumwUp"]
-                    output["muR_sumwDown"] = sumws["muR_sumwDown"]
-                    output["muF_sumwUp"] = sumws["muF_sumwUp"]
-                    output["muF_sumwDown"] = sumws["muF_sumwDown"]
-                if "PSWeight" in events.fields:
-                    if len(events.PSWeight[0]) == 4:
-                        output["ISR_sumwUp"] = sumws["ISR_sumwUp"]
-                        output["ISR_sumwDown"] = sumws["ISR_sumwDown"]
-                        output["FSR_sumwUp"] = sumws["FSR_sumwUp"]
-                        output["FSR_sumwDown"] = sumws["FSR_sumwDown"]
+            # one sum per generator-level variation, see correction.reweighting
+            output.update({k: v for k, v in sumws.items() if k.startswith("sumw_")})
 
         ####################
         #    Selections    #
@@ -137,24 +149,45 @@ class NanoProcessor(processor.ProcessorABC):
         req_metfilter = MET_filters(events, self._campaign)
 
         # Muon cuts
-        dilep_mu = events.Muon[
-            ak.any(events.Muon.pt > 20, axis=1)
-            & (events.Muon.pt > 12)
-            & mu_idiso(events, self._campaign)
-        ]
+        if "2D" in self.selMod and self._campaign in [
+            "Summer24",
+            "CustomSummer24",
+            "CustomSummer24UParTPaper",
+            "CustomSummer25",
+            "Winter25",
+            "Prompt25",
+        ]:  # NanoAODv15
+            dilep_mu = events.Muon[(events.Muon.pt > 12) & mu_promptmvaid(events)]
+        else:
+            dilep_mu = events.Muon[(events.Muon.pt > 12) & mu_idiso(events)]
 
         # Electron cuts
-        dilep_ele = events.Electron[
-            ak.any(events.Electron.pt > 26, axis=1)
-            & (events.Electron.pt > 15)
-            & ele_mvatightid(events, self._campaign)
-        ]
+        if "2D" in self.selMod and self._campaign in [
+            "Summer24",
+            "CustomSummer24",
+            "CustomSummer24UParTPaper",
+            "CustomSummer25",
+            "Winter25",
+            "Prompt25",
+        ]:  # NanoAODv15
+            dilep_ele = events.Electron[
+                (events.Electron.pt > 15) & ele_promptmvaid(events, self._campaign)
+            ]
+        else:
+            dilep_ele = events.Electron[
+                (events.Electron.pt > 15) & ele_mvatightid(events, self._campaign)
+            ]
+
         if isMu:
             thisdilep = dilep_mu
             otherdilep = dilep_ele
+            if "2D" in self.selMod:
+                req_leppt = ak.max(dilep_mu.pt, axis=1, mask_identity=False) > 20
         else:
             thisdilep = dilep_ele
             otherdilep = dilep_mu
+            if "2D" in self.selMod:
+                req_leppt = ak.max(dilep_ele.pt, axis=1, mask_identity=False) > 25
 
         # dilepton
         pos_dilep = thisdilep[thisdilep.charge > 0]
@@ -168,6 +201,8 @@ class NanoProcessor(processor.ProcessorABC):
             False,
             axis=-1,
         )
+        if "2D" in self.selMod:
+            req_dilep = req_dilep & req_leppt
 
         pos_dilep = ak.pad_none(pos_dilep, 1, axis=1)
         neg_dilep = ak.pad_none(neg_dilep, 1, axis=1)
@@ -190,15 +225,26 @@ class NanoProcessor(processor.ProcessorABC):
         else:
             jetmask = jet_id(events, self._campaign)
 
+        if "2D" in self.selMod:
+            # clean against the shared loose veto-lepton collections (Run 2
+            # parity); the Z leptons are a subset of these by construction.
+            # None-handling documented in jet_veto_lepton_clean.
+            lep_iso = jet_veto_lepton_clean(events, self._campaign)
+        else:
+            lep_iso = pl_iso & nl_iso
+
         jet_sel = ak.fill_none(
-            pl_iso & nl_iso & jetmask,
+            lep_iso & jetmask,
             False,
             axis=-1,
         )
 
         event_jet = events.Jet[jet_sel]
 
-        req_jets = ak.count(event_jet.pt, axis=1) >= 1
+        if "2D" in self.selMod:
+            req_jets = ak.count(event_jet.pt, axis=1) == 1
+        else:
+            req_jets = ak.count(event_jet.pt, axis=1) >= 1
 
         # store jet index for PFCands, create mask on the jet index
         jetindx = ak.mask(
@@ -208,9 +254,37 @@ class NanoProcessor(processor.ProcessorABC):
         jetindx = ak.pad_none(jetindx, 1)
         jetindx = jetindx[:, 0]
 
+        # raw jet index for the up-to-3 selected jets stored in SelJet (2D
+        # selMod); kept ragged (not padded) to match SelJet's own shape
+        jetindx3 = ak.local_index(events.Jet.pt)[jet_sel]
+
         selection = (
             req_lumi & req_trig & req_dilep & req_dilepmass & req_jets & req_metfilter
         )
+
+        if "2D" in self.selMod:
+            # Run 2 parity: balanced Z + 1-jet topology.
+            #
+            # The jet/Z pT balance cut (Run 2: 0.75 < pT(jet)/pT(Z) < 1.25) is
+            # DELIBERATELY NOT APPLIED. Measured on CustomSummer24 MC: it costs
+            # 49 % of the probe jets -- the single most expensive cut in this
+            # channel -- while moving the light-jet composition by only ~1 pp
+            # (gluon fraction 0.289 -> 0.279, `undef` 0.053 -> 0.040). The
+            # light-jet statistics it removes is what makes SF_flavL in the
+            # b-like categories (B0/B1/B2) unmeasurable: with the cut, the
+            # Asimov sigma of SF_flavL_B1 degrades from 0.100 to 0.243 and
+            # B2/B4 fall below the prefit Fisher gate entirely.
+            #
+            # What actually keeps this sample quark-rich is taking ONE probe per
+            # event instead of every selected jet (gluon fraction 0.384 -> 0.306),
+            # i.e. `njet == 1` plus a single stored probe -- not the balance cut.
+            # So the purity argument is served by the jet count, and the balance
+            # cut only costs resolution. Keep dphi(Z,jet) and pT(Z), which are
+            # cheap (-18 % combined) and remove the genuinely unbalanced tail.
+            jet0 = ak.pad_none(event_jet, 1, axis=1)[:, 0]
+            req_zjet_dphi = ak.fill_none(abs(dilep_mass.delta_phi(jet0)) > 2, False)
+            req_dilep_pt = ak.fill_none(dilep_mass.pt > 25, False)
+            selection = selection & req_zjet_dphi & req_dilep_pt
 
         if "QG" in self.selMod:
             temp_jet = ak.pad_none(event_jet, 1, axis=1)
@@ -265,13 +339,24 @@ class NanoProcessor(processor.ProcessorABC):
         pruned_ev = events[event_level]
         if self.selMod == "QG":
             pruned_ev["SelJet"] = event_jet[event_level][:, 0]
-            pruned_ev["Tag"] = sz
-            pruned_ev["Tag", "pt"] = pruned_ev.Tag.pt
-            pruned_ev["Tag", "eta"] = pruned_ev.Tag.eta
-            pruned_ev["Tag", "phi"] = pruned_ev.Tag.phi
-            pruned_ev["Tag", "mass"] = pruned_ev.Tag.mass
+            # a plain (behavior-less) record, not sz itself -- attaching pt/eta/
+            # phi/mass fields onto sz's own vector-behaved record would leave it
+            # with both cartesian (x,y from the sum) and polar (pt/eta/phi/mass)
+            # fields at once, which awkward2's CandidateArray validation rejects
+            # on any later access (e.g. histogramming)
+            pruned_ev["Tag"] = ak.zip(
+                {"pt": sz.pt, "eta": sz.eta, "phi": sz.phi, "mass": sz.mass}
+            )
         else:
-            pruned_ev["SelJet"] = event_jet[event_level]
+            # keep up to 3 jets/event so jet1, jet2 (and their SV info) are
+            # stored alongside jet0, not just the leading jet
+            pruned_ev["SelJet"] = event_jet[event_level][:, :3]
+            if (
+                "2D" in self.selMod
+                and not isRealData
+                and "nBHadrons" in pruned_ev.SelJet.fields
+            ):
+                pruned_ev["SelJet", "fineFlav"] = fineflav(pruned_ev.SelJet)
 
         if isMu:
             pruned_ev["MuonPlus"] = sposmu
@@ -287,11 +372,10 @@ class NanoProcessor(processor.ProcessorABC):
             pruned_ev["negl"] = snegmu
             pruned_ev["SelElectron"] = smu
             # kinOnly = ["SelElectron", "ElectronPlus", "ElectronMinus"]
-        pruned_ev["dilep"] = sz
-        pruned_ev["dilep", "pt"] = pruned_ev.dilep.pt
-        pruned_ev["dilep", "eta"] = pruned_ev.dilep.eta
-        pruned_ev["dilep", "phi"] = pruned_ev.dilep.phi
-        pruned_ev["dilep", "mass"] = pruned_ev.dilep.mass
+        # a plain (behavior-less) record -- see comment on the "Tag" block above
+        pruned_ev["dilep"] = ak.zip(
+            {"pt": sz.pt, "eta": sz.eta, "phi": sz.phi, "mass": sz.mass}
+        )
         pruned_ev["njet"] = ak.count(event_jet[event_level].pt, axis=1)
 
         pruned_ev["dr_mu1jet"] = sposmu.delta_r(sel_jet)
@@ -299,6 +383,22 @@ class NanoProcessor(processor.ProcessorABC):
         # Find the PFCands associate with selected jets. Search from jetindex->JetPFCands->PFCand
         if "PFCands" in events.fields and "QG" not in self.selMod:
             pruned_ev["PFCands"] = PFCand_link(events, event_level, jetindx)
+
+        # Match secondary vertices to each of the (up to 3) selected jets.
+        # SV_link_ragged falls back to a dR match when the Jet->SV index link
+        # is unavailable (e.g. CustomSummer24, a private NanoAOD production
+        # that keeps the SV collection but drops it).
+        if "SV" in events.fields and "QG" not in self.selMod:
+            svmass, svd3dsig = SV_link_ragged(
+                events, event_level, jetindx3[event_level][:, :3]
+            )
+            pruned_ev["SelJet", "svmass"] = svmass
+            pruned_ev["SelJet", "svd3dsig"] = svd3dsig
+
+        # position of each entry within the stored SelJet list itself (0 =
+        # leading, 1 = subleading, ...), not the original NanoAOD Jet index
+        if "QG" not in self.selMod:
+            pruned_ev["SelJet", "jetIdx"] = ak.local_index(pruned_ev.SelJet, axis=1)
 
         ####################
         #     Output       #
@@ -309,7 +409,7 @@ class NanoProcessor(processor.ProcessorABC):
             pruned_ev,
             self.SF_map,
             self.isSyst,
-            ttbar_reweights=getattr(self, "ttbar_reweights", "none"),
+            ttbar_reweights=self.ttbar_reweights,
             campaign=self._campaign,
         )
         # Configure systematics
@@ -368,7 +468,8 @@ class NanoProcessor(processor.ProcessorABC):
                 systematics,
                 dataset,
                 isRealData,
-                schema="CFM",  # doOnly=["SelJet","njet","PuppiMET"]
+                schema="SLIM",  # doOnly=["SelJet","njet","PuppiMET"]
+                perJet=("QG" not in self.selMod),
             )
 
         return {dataset: output}

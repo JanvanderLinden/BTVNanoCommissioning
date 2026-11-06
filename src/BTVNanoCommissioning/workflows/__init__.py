@@ -33,6 +33,17 @@ from BTVNanoCommissioning.workflows.ctag_DY_valid_sf import (
     NanoProcessor as CTAGDYValidSFProcessor,
 )
 
+# 2D pseudo-continuous
+from BTVNanoCommissioning.workflows._2D_ttsemilep_valid_sf import (
+    NanoProcessor as _2DTTsemilepValidSFProcessor,
+)
+from BTVNanoCommissioning.workflows._2D_Wc_valid_sf import (
+    NanoProcessor as _2DWcValidSFProcessor,
+)
+from BTVNanoCommissioning.workflows._2D_dijet_valid_sf import (
+    NanoProcessor as _2DDijetValidSFProcessor,
+)
+
 # QCD
 from BTVNanoCommissioning.workflows.QCD_validation import (
     NanoProcessor as QCDValidProcessor,
@@ -62,6 +73,9 @@ from BTVNanoCommissioning.workflows.example import (
     NanoProcessor as ExampleProcessor,
 )
 
+## object efficiencies (Z tag-and-probe, Z counting, jets in Z events)
+from BTVNanoCommissioning.workflows.obj_eff import NanoProcessor as ObjEffProcessor
+
 ## SFl DY+Jets
 from BTVNanoCommissioning.workflows.DY_sfl import (
     NanoProcessor as NegTagDYValidSFProcessor,
@@ -73,6 +87,9 @@ workflows["validation"] = ValidationProcessor
 
 # TTBar
 workflows["ttdilep_sf"] = partial(TTdilepValidSFProcessor, selectionModifier="tt_dilep")
+workflows["2D_emu_ttdilep_sf"] = partial(
+    TTdilepValidSFProcessor, selectionModifier="ttdilep_sf_2D"
+)
 workflows["ttsemilep_sf"] = partial(
     TTsemilepValidSFProcessor, selectionModifier="tt_semilep"
 )
@@ -97,6 +114,12 @@ workflows["ctag_ttsemilep_noMuVeto_sf"] = partial(
 workflows["ectag_ttsemilep_sf"] = partial(
     CTAGWcTTValidSFProcessor, selectionModifier="semittE"
 )
+workflows["2D_e_ttsemilep_sf"] = partial(
+    _2DTTsemilepValidSFProcessor, selectionModifier="semittE_2D"
+)
+workflows["2D_mu_ttsemilep_sf"] = partial(
+    _2DTTsemilepValidSFProcessor, selectionModifier="semittM_2D"
+)
 
 workflows["sf_ttsemilep_tnp"] = TTsemilepTnPSFProcessor
 
@@ -109,7 +132,9 @@ workflows["ctag_Wc_sf"] = partial(CTAGWcTTValidSFProcessor, selectionModifier="W
 workflows["ctag_Wc_noMuVeto_sf"] = partial(
     CTAGWcTTValidSFProcessor, selectionModifier="WcM_noMuVeto"
 )
+workflows["2D_mu_Wc_sf"] = partial(_2DWcValidSFProcessor, selectionModifier="WcM_2D")
 workflows["ectag_Wc_sf"] = partial(CTAGWcTTValidSFProcessor, selectionModifier="WcE")
+workflows["2D_e_Wc_sf"] = partial(_2DWcValidSFProcessor, selectionModifier="WcE_2D")
 workflows["ctag_Wc_WP_sf"] = partial(
     CTAGWcTTValidSFProcessor, selectionModifier="cutbased_WcM"
 )
@@ -117,10 +142,22 @@ workflows["ectag_Wc_WP_sf"] = partial(
     CTAGWcTTValidSFProcessor, selectionModifier="cutbased_WcE"
 )
 
+# Dijet tag-and-probe (2D). The two variants share the same data and overlap in
+# pT -- they are alternative triggerings of the same events, not independent
+# channels, so do not put both into one fit.
+workflows["2D_dijet_sf"] = partial(
+    _2DDijetValidSFProcessor, selectionModifier="DiPFJetAve"
+)
+workflows["2D_dijet_lowpt_sf"] = partial(
+    _2DDijetValidSFProcessor, selectionModifier="PFJet"
+)
+
 # DY
 workflows["ctag_DY_sf"] = partial(CTAGDYValidSFProcessor, selectionModifier="DYM_ctag")
 workflows["ectag_DY_sf"] = partial(CTAGDYValidSFProcessor, selectionModifier="DYE_ctag")
 
+workflows["2D_mu_DY_sf"] = partial(CTAGDYValidSFProcessor, selectionModifier="DYM_2D")
+workflows["2D_e_DY_sf"] = partial(CTAGDYValidSFProcessor, selectionModifier="DYE_2D")
 
 # QG
 workflows["QG_DY"] = partial(CTAGDYValidSFProcessor, selectionModifier="QG")
@@ -141,5 +178,8 @@ workflows["BTA"] = BTA_processor
 workflows["BTA_addPFMuons"] = partial(BTA_processor, addPFMuons=True)
 workflows["BTA_addAllTracks"] = partial(BTA_processor, addAllTracks=True)
 workflows["BTA_ttbar"] = BTA_ttbar_processor
+
+workflows["obj_eff_mu"] = partial(ObjEffProcessor, selectionModifier="M")
+workflows["obj_eff_e"] = partial(ObjEffProcessor, selectionModifier="E")
 
 __all__ = ["workflows"]
