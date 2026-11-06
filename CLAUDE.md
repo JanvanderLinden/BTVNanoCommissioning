@@ -13,9 +13,10 @@ The repo is also used as the frontend for the GitLab `autobtv` automation pipeli
 ## Setup
 
 ```bash
-# env is normally pre-provisioned on lxplus at /eos/home-m/milee/miniforge3/envs/btv_coffea
+# env from test_env.yml (python 3.10, coffea 2026.7.0); the central lxplus env
+# /eos/home-m/milee/miniforge3/envs/btv_coffea is coffea 0.7 and does not work
 conda/micromamba activate btv_coffea
-pip install -e .            # or -e .[dev,doc] for dev/docs extras
+pip install -e .            # or -e .[dev,docs] for dev/docs extras
 source env_setup_complete.sh  # ensures `dasgoclient` is on $PATH
 ```
 Standalone env can be created from `test_env.yml` via micromamba if not on lxplus.

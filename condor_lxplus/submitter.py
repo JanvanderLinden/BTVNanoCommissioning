@@ -230,6 +230,10 @@ if __name__ == "__main__":
         for i in os.environ["PATH"].split(":")
         if "envs/btv_coffea" in i or "envs/BTVCOFFEA" in i
     ]
+    # the active conda/micromamba environment, whatever its name
+    conda_prefix = os.environ.get("CONDA_PREFIX", "")
+    if "/envs/" in conda_prefix:
+        pathvarlist.insert(0, os.path.join(conda_prefix, "bin"))
     if len(pathvarlist) == 0:
         print(
             f"You did not source the btv_coffea conda/mamba environment. Proceed with the central conda environment:\n{envpath} ?"
