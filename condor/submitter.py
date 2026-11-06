@@ -341,17 +341,17 @@ if __name__ == "__main__":
             make_tarfile(
                 "BTVNanoCommissioning.tar.gz",
                 base_dir,
-                # "metadata" (repo root and SFbc-2D/) holds dataset file-list
-                # JSONs (100s of MB) that only fetch.py/submitter.py need --
-                # each job gets its own file list via split_samples.json instead.
-                # .git alone is ~666 MB; SFbc-2D/docs/notebooks/testfile are
-                # analysis-side and never read by the job. Dropping these takes
+                # "metadata" holds dataset file-list JSONs (100s of MB) that only
+                # fetch.py/submitter.py need -- each job gets its own file list
+                # via split_samples.json instead. .git alone is ~666 MB;
+                # sfs-3d/docs/notebooks/testfile are analysis-side and never
+                # read by the job. Dropping these takes
                 # the sandbox from 588 MB to ~38 MB per job.
                 exclude_dirs=[
                     "BTVNanoCommissioning.egg-info",
                     "metadata",
                     ".git",
-                    "SFbc-2D",
+                    "sfs-3d",
                     "docs",
                     "notebooks",
                     "testfile",

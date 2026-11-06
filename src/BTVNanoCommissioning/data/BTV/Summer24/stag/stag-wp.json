@@ -1,0 +1,97 @@
+{
+  "schema_version": 2,
+  "description": "Single sequential 1D tagging-bin classifier, derived by step3__make_1d_wps.py from tagger_config_ptincl.yml. Given jet pt and the configured tagger scores, returns the (floated) integer index of the exclusive tagging bin the jet falls in, following the same b -> c -> s style cascade used to derive the WPs -- implemented as nested/staggered 'binning' nodes (pt, then one axis per level), no formula node. Bin numbering starts at 0 on the first axis and increases through each subsequent axis, EXCEPT the cascade's terminal axis, whose bins are numbered in reverse (untagged/loosest bin first, tightest bin last). Mapping: 0=BT, 1=BL, 2=CT, 3=CL, 4=L, 5=SL, 6=SM, 7=ST.",
+  "corrections": [
+    {
+      "name": "tagging_bin",
+      "description": "Exclusive tagging bin index. Mapping: 0=BT, 1=BL, 2=CT, 3=CL, 4=L, 5=SL, 6=SM, 7=ST.",
+      "version": 1,
+      "inputs": [
+        {
+          "name": "pt",
+          "type": "real",
+          "description": "jet pt [GeV]"
+        },
+        {
+          "name": "bvall",
+          "type": "real",
+          "description": "B vs. all"
+        },
+        {
+          "name": "cvnotb",
+          "type": "real",
+          "description": "C vs. not-B"
+        },
+        {
+          "name": "svudg",
+          "type": "real",
+          "description": "S vs. UDG"
+        }
+      ],
+      "output": {
+        "name": "bin",
+        "type": "real",
+        "description": "tagging bin index (integer-valued float)"
+      },
+      "data": {
+        "nodetype": "binning",
+        "input": "pt",
+        "edges": [
+          25.0,
+          250.0
+        ],
+        "flow": "clamp",
+        "content": [
+          {
+            "nodetype": "binning",
+            "input": "bvall",
+            "edges": [
+              0.0,
+              0.33679192660550467,
+              0.9361193325917687,
+              1.0
+            ],
+            "flow": "clamp",
+            "content": [
+              {
+                "nodetype": "binning",
+                "input": "cvnotb",
+                "edges": [
+                  0.0,
+                  0.556471975,
+                  0.9366697512195122,
+                  1.0
+                ],
+                "flow": "clamp",
+                "content": [
+                  {
+                    "nodetype": "binning",
+                    "input": "svudg",
+                    "edges": [
+                      0.0,
+                      0.22875533586818758,
+                      0.282342538071066,
+                      0.36970157303370793,
+                      1.0
+                    ],
+                    "flow": "clamp",
+                    "content": [
+                      4.0,
+                      5.0,
+                      6.0,
+                      7.0
+                    ]
+                  },
+                  3.0,
+                  2.0
+                ]
+              },
+              1.0,
+              0.0
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

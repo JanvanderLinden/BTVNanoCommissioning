@@ -73,7 +73,7 @@ conda activate "${COMMFW_ENV:-commfw2}"
 
 # One assignment covering rabbit and this repo. Previously RABBIT_BASE was put on
 # PYTHONPATH and then overwritten further down, which left rabbit unimportable.
-export PYTHONPATH="${RABBIT_BASE}:${REPO_ROOT}:${REPO_ROOT}/SFbc-2D/scripts/utilities${PYTHONPATH:+:${PYTHONPATH}}"
+export PYTHONPATH="${RABBIT_BASE}:${REPO_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
 
 export ISARRAY="${ISARRAY:-1}"
 export ARRAY_SYSTS="${ARRAY_SYSTS:-weights}"

@@ -40,6 +40,9 @@ from BTVNanoCommissioning.workflows._2D_ttsemilep_valid_sf import (
 from BTVNanoCommissioning.workflows._2D_Wc_valid_sf import (
     NanoProcessor as _2DWcValidSFProcessor,
 )
+from BTVNanoCommissioning.workflows.stag_tt1L_s import (
+    NanoProcessor as STagTT1LProcessor,
+)
 from BTVNanoCommissioning.workflows._2D_dijet_valid_sf import (
     NanoProcessor as _2DDijetValidSFProcessor,
 )
@@ -122,6 +125,17 @@ workflows["2D_mu_ttsemilep_sf"] = partial(
 )
 
 workflows["sf_ttsemilep_tnp"] = TTsemilepTnPSFProcessor
+
+# s-tagging SF: semileptonic ttbar s region (tt1L-s), SPANet W -> cs reconstruction
+workflows["stag_mu_tt1L_s"] = partial(STagTT1LProcessor, selectionModifier="semittM_s")
+workflows["stag_e_tt1L_s"] = partial(STagTT1LProcessor, selectionModifier="semittE_s")
+# SPANet training inputs (trees, nominal only, no SPANet evaluation)
+workflows["stag_mu_tt1L_s_spanet_data"] = partial(
+    STagTT1LProcessor, selectionModifier="semittM_s", spanet_data=True
+)
+workflows["stag_e_tt1L_s_spanet_data"] = partial(
+    STagTT1LProcessor, selectionModifier="semittE_s", spanet_data=True
+)
 
 # QCD
 workflows["QCD_sf"] = QCDValidProcessor

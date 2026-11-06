@@ -20,8 +20,8 @@ source env_setup_complete.sh  # ensures `dasgoclient` is on $PATH
 ```
 Standalone env can be created from `test_env.yml` via micromamba if not on lxplus.
 
-Python `<3.11` is required (see `setup.cfg`). This repo has a git submodule, `SFbc-2D` (2D SF
-derivation pipeline — see below); it has its own separate context/tooling.
+Python `<3.11` is required (see `setup.cfg`). This repo has a git submodule, `sfs-3d` (s-tagging
+WP/SF pipeline — see below); it has its own separate context/tooling.
 
 ## Running a workflow
 
@@ -115,10 +115,11 @@ Standalone condor submission (not the CI-only executors in `runner.py --executor
 up to a few hundred files; see `condor_lxplus/README.md` for the submit → checkoutputs → haddoutputs
 → normalizeArrays → haddFinal pipeline).
 
-### `SFbc-2D/` (git submodule)
-Separate 2D (pseudo-continuous tagger) SF derivation pipeline downstream of this framework's
-`--isArray` ROOT outputs — has its own scripts (`01_..sh`–`10_..sh`, `A_..sh`–`XX_..sh`) and is
-largely independent tooling; treat as a distinct project when working inside it.
+### `sfs-3d/` (git submodule)
+s-tagging (3D: b/c/s) working-point and SF pipeline downstream of this framework's `--isArray`
+ROOT outputs: run scripts (`A_..sh`, `B_..sh`, ...) in its base directory, `wp/` (WP derivation),
+`spanet/` (SPANet jet-parton assignment for the `stag_*_tt1L_s` workflows). Independent tooling;
+treat as a distinct project when working inside it.
 
 ## Conventions
 - Match `black` formatting; don't hand-format around it.
