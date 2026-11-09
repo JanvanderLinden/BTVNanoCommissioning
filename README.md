@@ -36,27 +36,29 @@ You can install your [standalone conda envrionment](#standalone-conda-environmen
 > suggested to install under `bash` environment
 
 
-For installing Micromamba, see [[here](https://mamba.readthedocs.io/en/latest/installation/micromamba-installation.html)]
+Install Miniforge (provides `conda` and `mamba`; for a standalone `micromamba` see [here](https://mamba.readthedocs.io/en/latest/installation/micromamba-installation.html)).
+The environment needs a few GB: on lxplus choose an install path with enough space (`-p <path>`).
 ```
 curl -L -O "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-$(uname)-$(uname -m).sh"
 # Run and follow instructions on screen
 bash Miniforge3-$(uname)-$(uname -m).sh
 
-micromamba activate
+# in every new shell (or once: <install path>/bin/conda init bash)
+source <install path>/etc/profile.d/conda.sh
 ```
-NOTE: always make sure that conda, python, and pip point to local micromamba installation (`which conda` etc.).
+NOTE: always make sure that conda, python, and pip point to your local installation (`which conda` etc.).
 
 
-You can simply create the environment through the existing `test_env.yml` under your micromamba environment using micromamba, and activate it
+Create the environment from `test_env.yml` (coffea is installed with it) and activate it
 ```
-micromamba env create -f test_env.yml   # environment btv_coffea: python 3.10, coffea 2026.7.0, awkward 2
-micromamba activate btv_coffea
+mamba env create -f test_env.yml   # environment btv_coffea: python 3.10, coffea 2026.7.0, awkward 2
+conda activate btv_coffea
 ```
 ### Setup the framework
 
 ```bash
 # activate enviroment once you have coffea framework 
-conda/micromamba activate btv_coffea
+conda activate btv_coffea
 
 # only first time, including submodules
 git clone --recurse-submodules git@github.com:cms-btv-pog/BTVNanoCommissioning.git 
@@ -75,5 +77,5 @@ You can still install additional packages itself by `pip install $PACKAGE`
 Make sure that 'dasgoclient' command is found by ensuring it is in your `$PATH` variable.
 Please, run `source env_setup_complete.sh` after having activated the environment to make sure that the `$PATH` variable is correctly configured.
 
-`conda/micromamba activate btv_coffea` is required to setup
+`conda activate btv_coffea` is required to setup
 
