@@ -294,6 +294,23 @@ if __name__ == "__main__":
     with open(os.path.join(job_dir, "jobnum_list.txt"), "w") as f:
         f.write("\n".join([str(i) for i in range(counter)]))
 
+    if "/eos/" in base_dir:
+        print(
+            "WARNING: Submitting from /eos. Log files will NOT be created.\nTo debug/retrieve logs, use `condor_transfer_data <job id>` after a job fails/terminates."
+        )
+        spool = "-spool"
+    else:
+        spool = ""
+
+    if args.noSpool:
+        print("Submitting without spooling due to --noSpool option.")
+        spool = ""
+
+    # The jobs write their outputs directly to --outputDir. Spool jobs must set
+    # transfer_output_files (CERN schedds reject them otherwise): transfer nothing back
+    # besides stdout/stderr.
+    transfer_output = 'transfer_output_files   = ""' if spool else ""
+
     ## store the jdl file
     jdl_template = """Universe   = vanilla
 Executable = {executable}
@@ -312,6 +329,7 @@ Error      = {log_dir}/job.err_$(Cluster)-$(Process)
 should_transfer_files   = YES
 when_to_transfer_output = ON_EXIT_OR_EVICT
 transfer_input_files    = {transfer_input_files}
+{transfer_output}
 on_exit_remove   = (ExitBySignal == False) && (ExitCode == 0)
 max_retries      = 3
 requirements     = (Machine =!= split(LastRemoteHost, "@")[1])
@@ -326,21 +344,11 @@ Queue JOBNUM from {jobnum_file}
         log_dir=f"{base_dir}/{job_dir}/log",
         transfer_input_files=f"{base_dir}/{job_dir}/arguments.json,{base_dir}/{job_dir}/split_samples.json,{base_dir}/{job_dir}/jobnum_list.txt",
         jobnum_file=f"{base_dir}/{job_dir}/jobnum_list.txt",
+        transfer_output=transfer_output,
     )
     with open(os.path.join(job_dir, "submit.jdl"), "w") as f:
         f.write(jdl_template)
 
-    if "/eos/" in base_dir:
-        print(
-            "WARNING: Submitting from /eos. Log files will NOT be created.\nTo debug/retrieve logs, use `condor_transfer_data <job id>` after a job fails/terminates."
-        )
-        spool = "-spool"
-    else:
-        spool = ""
-
-    if args.noSpool:
-        print("Submitting without spooling due to --noSpool option.")
-        spool = ""
     if args.submit:
         os.system(f"condor_submit {spool} {job_dir}/submit.jdl")
     else:
