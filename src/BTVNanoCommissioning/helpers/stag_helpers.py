@@ -46,7 +46,12 @@ _RUN3_2024 = {
     # score inputs; None: UParT discriminants, UPART_SCORES)
     "tagging_wps": f"{_DATA_DIR}/Summer24/stag/stag-wp.json",
     "tagging_scores": None,
-    "spanet_model": f"{_DATA_DIR}/Summer24/stag/spanet_model.onnx",
+    # SPANet ONNX model(s): one file, or the k-fold models in fold order (model k
+    # evaluates the events with event % k_folds == k)
+    "spanet_model": [
+        f"{_DATA_DIR}/Summer24/stag/spanet_model_fold0.onnx",
+        f"{_DATA_DIR}/Summer24/stag/spanet_model_fold1.onnx",
+    ],
     # cut on the (raw, un-doubled) SPANet W assignment probability -> pass_spanet_w
     "spanet_w_score_cut": 0.3,
     # tagID bins (0-7: BT, BL, CT, CL, L, SL, SM, ST) that count as b tagged (applied
@@ -91,6 +96,8 @@ def get_stag_config(campaign: str) -> dict:
     if str(cfg["tagging_scores"]).lower() in ("", "none"):
         cfg["tagging_scores"] = None
     cfg["spanet_model"] = os.environ.get("STAG_SPANET_MODEL", cfg.get("spanet_model"))
+    if isinstance(cfg["spanet_model"], str) and "," in cfg["spanet_model"]:
+        cfg["spanet_model"] = [f for f in cfg["spanet_model"].split(",") if f]
     if "STAG_SPANET_W_SCORE_CUT" in os.environ:
         cfg["spanet_w_score_cut"] = float(os.environ["STAG_SPANET_W_SCORE_CUT"])
     for key, env in (("btag_bins", "STAG_BTAG_BINS"), ("ctag_bins", "STAG_CTAG_BINS")):
@@ -472,7 +479,7 @@ def extract_best_assignment(lt_prob, htb_prob, w_prob) -> dict:
     return result
 
 
-class SpanetEvaluator:
+class SpanetModel:
     """
     Thin, picklable wrapper around an onnxruntime session (the session itself is created
     lazily on the worker and never pickled).
@@ -497,7 +504,8 @@ class SpanetEvaluator:
             raise FileNotFoundError(
                 f"stag: SPANet ONNX model not found at '{self.model_file}'. Provide the "
                 "model there or point the STAG_SPANET_MODEL environment variable "
-                "at it. To only produce SPANet training inputs use the "
+                "at it (comma-separated for k-fold models). To only produce SPANet "
+                "training inputs use the "
                 "'stag_{mu,e}_tt1L_s_spanet_data' workflows."
             )
         import onnxruntime as ort
@@ -553,6 +561,58 @@ class SpanetEvaluator:
             k: (np.concatenate(v, axis=0) if len(v) else np.zeros((0,)))
             for k, v in outs.items()
         }
+
+
+class SpanetEvaluator:
+    """
+    SPANet evaluation with one model or k-fold models.
+
+    ``model_files``: one ONNX file, or a list of N files in fold order. With N models,
+    an event with ``event % N == k`` is evaluated with model k, which was trained on the
+    events of the other folds (sfs-3d ``spanet/make_dataset.py --folds N``).
+    """
+
+    def __init__(self, model_files, batch_size: int = 50000):
+        if isinstance(model_files, (str, os.PathLike)) or model_files is None:
+            model_files = [model_files]
+        self.model_files = list(model_files)
+        self.models = [SpanetModel(f, batch_size) for f in self.model_files]
+
+    @property
+    def n_folds(self) -> int:
+        return len(self.models)
+
+    def check(self):
+        """Load every model once (file, input and output names), then drop the sessions."""
+        for m in self.models:
+            m._load()
+            m._session = None
+            m._output_names = None
+
+    def __call__(self, feed: dict, event=None) -> dict:
+        """Outputs per event; ``event`` (event numbers) selects the fold model."""
+        if self.n_folds == 1:
+            return self.models[0](feed)
+        if event is None:
+            raise ValueError("stag: k-fold SPANet evaluation needs the event numbers")
+        fold = np.asarray(event, dtype=np.uint64) % np.uint64(self.n_folds)
+        order, results = [], []
+        for k, model in enumerate(self.models):
+            idx = np.flatnonzero(fold == np.uint64(k))
+            if len(idx) == 0:
+                continue
+            results.append(model({key: v[idx] for key, v in feed.items()}))
+            order.append(idx)
+        if not results:
+            return self.models[0](feed)
+        order = np.concatenate(order)
+        out = {}
+        for name in results[0]:
+            values = np.concatenate([r[name] for r in results], axis=0)
+            arr = np.empty_like(values)
+            arr[order] = values
+            out[name] = arr
+        return out
 
 
 # --------------------------------------------------------------------------------------

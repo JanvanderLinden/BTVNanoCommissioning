@@ -194,8 +194,7 @@ class NanoProcessor(processor.ProcessorABC):
         if self.evaluate_spanet:
             TaggingBin(self.tagging_wps_file, self.tagging_scores_file)
             self.spanet = SpanetEvaluator(self.cfg["spanet_model"])
-            self.spanet._load()
-            self.spanet._session = None  # recreated lazily on the workers
+            self.spanet.check()  # sessions are recreated lazily on the workers
         else:
             self.spanet = None
 
@@ -526,7 +525,7 @@ class NanoProcessor(processor.ProcessorABC):
                     pad_np(jets_ev.partonFlavour, MAX_JETS, 0, np.int32)
                 )
 
-            outputs = self.spanet(onnx_feed(inputs))
+            outputs = self.spanet(onnx_feed(inputs), event=ak.to_numpy(ev.event))
             assignment = extract_best_assignment(
                 outputs["lt_assignment_probability"],
                 outputs["htb_assignment_probability"],
