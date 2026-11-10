@@ -48,6 +48,14 @@ def get_condor_submitter_parser(parser):
         help="If specified, access BTVNanoCommissioning from a remote tarball (downloaded via https), instead of from a transferred sandbox",
     )
     parser.add_argument(
+        "--jobDir",
+        default=os.environ.get("BTV_CONDOR_JOBDIR", "."),
+        help="Directory in which the job directory jobs_<jobName> (configs, logs) is "
+        "created (default: $BTV_CONDOR_JOBDIR, else the current directory). Outside /eos "
+        "(e.g. on AFS) the jobs are submitted without spooling and the logs are written "
+        "there directly.",
+    )
+    parser.add_argument(
         "--noSpool", action="store_true", help="Submit condor jobs without spooling."
     )
     parser.add_argument(
@@ -201,7 +209,8 @@ if __name__ == "__main__":
     current_dir = os.path.dirname(os.path.abspath(__file__))
     base_dir = current_dir.replace("/condor_lxplus", "")
     # Create job dir
-    job_dir = f"jobs_{args.jobName}"
+    os.makedirs(args.jobDir, exist_ok=True)
+    job_dir = os.path.abspath(os.path.join(args.jobDir, f"jobs_{args.jobName}"))
     if os.path.exists(job_dir):
         user_input = input("Job directory already exists, overwrite? (y/n): ")
         if user_input.lower() == "y":
@@ -216,11 +225,11 @@ if __name__ == "__main__":
     if args.voms is not None:
         if not os.path.exists(args.voms):
             raise Exception(f"Provided voms proxy path {args.voms} does not exist.")
-        shutil.copy(args.voms, os.path.join(job_dir + "/..", "proxy"))
+        shutil.copy(args.voms, os.path.join(base_dir, "proxy"))
         print(f"Copied provided proxy file {args.voms} to local directory.")
     else:
         proxy_file = get_proxy_path()
-        os.system(f"scp {proxy_file} proxy")
+        os.system(f"scp {proxy_file} {os.path.join(base_dir, 'proxy')}")
         print(f"Copied proxy file {proxy_file} to local directory.")
 
     # Find conda/mamba environment
@@ -294,7 +303,7 @@ if __name__ == "__main__":
     with open(os.path.join(job_dir, "jobnum_list.txt"), "w") as f:
         f.write("\n".join([str(i) for i in range(counter)]))
 
-    if "/eos/" in base_dir:
+    if "/eos/" in job_dir:
         print(
             "WARNING: Submitting from /eos. Log files will NOT be created.\nTo debug/retrieve logs, use `condor_transfer_data <job id>` after a job fails/terminates."
         )
@@ -341,9 +350,9 @@ Queue JOBNUM from {jobnum_file}
         outputDir=args.outputDir,
         envpath=envpath,
         nthreads=args.nCPU,
-        log_dir=f"{base_dir}/{job_dir}/log",
-        transfer_input_files=f"{base_dir}/{job_dir}/arguments.json,{base_dir}/{job_dir}/split_samples.json,{base_dir}/{job_dir}/jobnum_list.txt",
-        jobnum_file=f"{base_dir}/{job_dir}/jobnum_list.txt",
+        log_dir=f"{job_dir}/log",
+        transfer_input_files=f"{job_dir}/arguments.json,{job_dir}/split_samples.json,{job_dir}/jobnum_list.txt",
+        jobnum_file=f"{job_dir}/jobnum_list.txt",
         transfer_output=transfer_output,
     )
     with open(os.path.join(job_dir, "submit.jdl"), "w") as f:
