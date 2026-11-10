@@ -17,6 +17,7 @@ from .histograms.ttsemilep import get_histograms as ttsemilep_hists
 from .histograms.qcd import get_histograms as qcd_hists
 from .histograms.qcd_smu import get_histograms as qcd_smu_hists
 from .histograms.sf2d import get_histograms as sf2d_hists
+from .histograms.stag import get_histograms as stag_hists
 from .histograms.validation import get_histograms as validation_hists
 from .histograms.wc import get_histograms as wc_hists
 from .histograms.qgtag import get_histograms as qgtag_hists
@@ -64,6 +65,7 @@ def get_hist_collections(axes: dict, hist_collections: list, **kwargs):
         "ttsemilep_2D": ttsemilep_2D_hists,
         "ttsemilep": ttsemilep_hists,
         "SF2D": sf2d_hists,
+        "STAG": stag_hists,
         "validation": validation_hists,
         "Wc": wc_hists,
         "qgtag": qgtag_hists,

@@ -8,7 +8,8 @@ tested without a NanoAOD file.
 Contents
 --------
 - ``STAG_CONFIG``                  per-campaign settings (triggers, lepton SFs, external files, cuts)
-- ``TaggingBin``                   s-tagging WP bins (``tagID``) from the WP and score jsons
+- ``TaggingBin``                   s-tagging WP bins and scores from the sfs-3d WP json
+- ``add_stag_fields``              s-tag bin, scores, discriminants and flavour of jets
 - ``spanet_inputs``/``onnx_feed``  padded SPANet inputs
 - ``extract_best_assignment``      SPANet greedy best-overall jet assignment
 - ``SpanetEvaluator``              lazy ONNX runtime wrapper
@@ -19,9 +20,7 @@ Contents
 
 from __future__ import annotations
 
-import json
 import os
-import re
 
 import numpy as np
 import awkward as ak
@@ -33,8 +32,7 @@ import awkward as ak
 _DATA_DIR = "src/BTVNanoCommissioning/data/BTV"
 
 # Per-campaign configuration. Paths can be overridden with environment variables:
-#   STAG_TAGGING_WPS    -> correctionlib json with the "tagging_bin" correction
-#   STAG_TAGGING_SCORES -> definition of its score inputs ("" or "none": UParT default)
+#   STAG_TAGGING_WPS    -> sfs-3d WP json ("tagging_bin", "score_<axis>")
 #   STAG_SPANET_MODEL -> SPANet ONNX model
 _RUN3_2024 = {
     # single-lepton triggers per channel
@@ -42,10 +40,8 @@ _RUN3_2024 = {
     # correction_config entries (AK4_parameters) with the lepton SFs of the
     # prompt-MVA lepton selection, per channel
     "lepton_sf_selmod": {"mu": "semittM_2D", "e": "semittE_2D"},
-    # sfs-3d WP outputs: wps.json ("tagging_bin") and wps_scores.json (definition of its
-    # score inputs; None: UParT discriminants, UPART_SCORES)
+    # sfs-3d WP json (wps.json of B_derive_wps.sh)
     "tagging_wps": f"{_DATA_DIR}/Summer24/stag/stag-wp.json",
-    "tagging_scores": None,
     # SPANet ONNX model(s): one file, or the k-fold models in fold order (model k
     # evaluates the events with event % k_folds == k)
     "spanet_model": [
@@ -66,7 +62,6 @@ _RUN3_2024 = {
 _RUN3_2024_NOPID = dict(
     _RUN3_2024,
     tagging_wps=f"{_DATA_DIR}/CustomSummer24/stag/stag-wp-NoPIDParTAK4.json",
-    tagging_scores=f"{_DATA_DIR}/CustomSummer24/stag/stag-wp-NoPIDParTAK4_scores.json",
 )
 STAG_CONFIG = {
     "Summer24": _RUN3_2024,
@@ -90,11 +85,6 @@ def get_stag_config(campaign: str) -> dict:
         if env in os.environ:
             cfg[key] = float(os.environ[env])
     cfg["tagging_wps"] = os.environ.get("STAG_TAGGING_WPS", cfg.get("tagging_wps"))
-    cfg["tagging_scores"] = os.environ.get(
-        "STAG_TAGGING_SCORES", cfg.get("tagging_scores")
-    )
-    if str(cfg["tagging_scores"]).lower() in ("", "none"):
-        cfg["tagging_scores"] = None
     cfg["spanet_model"] = os.environ.get("STAG_SPANET_MODEL", cfg.get("spanet_model"))
     if isinstance(cfg["spanet_model"], str) and "," in cfg["spanet_model"]:
         cfg["spanet_model"] = [f for f in cfg["spanet_model"].split(",") if f]
@@ -191,140 +181,198 @@ def flav_class(flav):
 
 TAG_BIN_NAMES = ["BT", "BL", "CT", "CL", "L", "SL", "SM", "ST"]
 
-# Score definition of WP files without a scores json (sfs-3d `wps_scores.json`): the
-# "tagging_bin" inputs are the NanoAOD UParT discriminants, unclamped.
-UPART_SCORES = {
-    "tagger": "UParTAK4",
-    "inputs": {
-        "bvall": "btagUParTAK4B",
-        "cvnotb": "btagUParTAK4CvNotB",
-        "svudg": "btagUParTAK4SvUDG",
-    },
-    "derived": {},
-    "scores": {
-        "bvall": {"expression": "ak4_bvall", "range": None},
-        "cvnotb": {"expression": "ak4_cvnotb", "range": None},
-        "svudg": {"expression": "ak4_svudg", "range": None},
-    },
+# Inputs of the WP files of the earlier UParT derivation (scores as inputs), keyed by
+# correction input name. The sfs-3d WP files take the raw NanoAOD Jet branches instead
+# (input name = branch name) and compute the scores inside the correction.
+LEGACY_INPUTS = {
+    "bvall": "btagUParTAK4B",
+    "cvnotb": "btagUParTAK4CvNotB",
+    "svudg": "btagUParTAK4SvUDG",
 }
 
-# C++ float literals (1.f, 1e-6f) of the sfs-3d RDataFrame expressions
-_CXX_FLOAT = re.compile(r"(?<![\w.])((?:\d+\.\d*|\.\d+|\d+)(?:[eE][-+]?\d+)?)[fF]\b")
+# s-tagging jet flavours (as in the sfs-3d WP derivation), stagFlav = index
+STAG_FLAVOURS = ["b", "bb", "c", "cc", "s", "ud", "g", "PU"]
 
-
-def _py_expression(expr: str):
-    expr = _CXX_FLOAT.sub(r"\1", expr)
-    try:
-        return compile(expr, "<stag score>", "eval")
-    except SyntaxError as err:
-        raise ValueError(
-            f"stag: score expression '{expr}' is not plain arithmetic: {err}"
-        ) from err
-
-
-def _evaluate(code, namespace: dict) -> np.ndarray:
-    with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
-        return np.asarray(
-            eval(code, {"__builtins__": {}}, namespace), dtype=np.float64  # noqa: S307
-        )
+# NoPIDParTAK4 class probabilities and the discriminants built from them
+NOPID_PROBS = ["probb", "probbb", "probc", "probcc", "probs", "probud", "probg"]
+NOPID_DISCRIMINANTS = ["BvAll", "CvNotB", "SvUDG", "SvUD"]
 
 
 class TaggingBin:
     """
-    s-tagging WP bin per jet (0-7: BT, BL, CT, CL, L, SL, SM, ST) from the
-    "tagging_bin" correction of the WP json (sfs-3d `wps.json`).
+    s-tagging WP bin per jet (0-7: BT, BL, CT, CL, L, SL, SM, ST) and the scores of the
+    cascade, from the WP json of the sfs-3d derivation (``wps.json``):
 
-    The scores entering the correction are defined by the scores json (sfs-3d
-    `wps_scores.json`): NanoAOD Jet branches (``inputs``), derived columns
-    (``derived``) and one expression per score, clamped into [lo, hi) as in the WP
-    derivation (incl. score reweightings). Without a scores json, ``UPART_SCORES``.
+    - ``tagging_bin``(pt, raw tagger outputs...) -> bin index
+    - ``score_<axis>``(raw tagger outputs...) -> score (reweighted where the WPs are)
+
+    The correction inputs are NanoAOD Jet branch names (``pt``,
+    ``btagNoPIDParTAK4probb``, ...). Older WP files with the scores as inputs
+    (``bvall``, ``cvnotb``, ``svudg``) are read with ``LEGACY_INPUTS``.
+    Picklable: the correctionlib objects are loaded lazily.
     """
 
-    def __init__(self, wps_path: str, scores_path: str | None = None):
+    def __init__(self, wps_path: str):
+        self.wps_path = wps_path
+        self._cset = None
+
+    def __getstate__(self):
+        state = dict(self.__dict__)
+        state["_cset"] = None
+        return state
+
+    def _load(self):
+        if self._cset is not None:
+            return
         import correctionlib
 
-        for kind, path, env in (
-            ("WP", wps_path, "STAG_TAGGING_WPS"),
-            ("score definition", scores_path, "STAG_TAGGING_SCORES"),
-        ):
-            if kind == "score definition" and not path:
-                continue
-            if path is None or not os.path.exists(path):
-                raise FileNotFoundError(
-                    f"stag: tagging {kind} file not found at '{path}'. Provide it there "
-                    f"or point the {env} environment variable at it."
-                )
-        self.corrector = correctionlib.CorrectionSet.from_file(wps_path)["tagging_bin"]
-        if scores_path:
-            with open(scores_path) as fh:
-                self.definition = json.load(fh)
-        else:
-            self.definition = UPART_SCORES
-        self.tagger = self.definition["tagger"]
-        self.inputs = dict(self.definition.get("inputs") or {})
-        self.derived = [
-            (k, _py_expression(e))
-            for k, e in (self.definition.get("derived") or {}).items()
-        ]
-        self.scores = {
-            k: (_py_expression(v["expression"]), v.get("range"))
-            for k, v in self.definition["scores"].items()
-        }
-        missing = [
-            i.name
-            for i in self.corrector.inputs
-            if i.name != "pt" and i.name not in self.scores
-        ]
-        if missing:
-            raise KeyError(
-                f"stag: inputs {missing} of the tagging_bin correction in '{wps_path}' "
-                f"are not defined by the score definition ({scores_path or 'UParT default'})"
+        if self.wps_path is None or not os.path.exists(self.wps_path):
+            raise FileNotFoundError(
+                f"stag: tagging WP file not found at '{self.wps_path}'. Provide the "
+                "sfs-3d wps.json there or point the STAG_TAGGING_WPS environment "
+                "variable at it."
             )
+        self._cset = correctionlib.CorrectionSet.from_file(self.wps_path)
+        self.corrector = self._cset["tagging_bin"]
+        self.input_names = [i.name for i in self.corrector.inputs]
+        self.score_correctors = {
+            name[len("score_") :]: self._cset[name]
+            for name in self._cset.keys()
+            if name.startswith("score_")
+        }
+        legacy = [n for n in self.input_names if n in LEGACY_INPUTS]
+        if legacy and not self.wps_path.endswith(".gz"):
+            # score inputs are only meaningful as the UParT discriminants
+            import json
+
+            with open(self.wps_path) as fh:
+                desc = json.load(fh).get("description", "") or ""
+            if "UParT" not in desc and ("NoPID" in desc or "ParTAK4" in desc):
+                raise ValueError(
+                    f"stag: '{self.wps_path}' takes the scores {legacy} as inputs and was "
+                    f"not derived for the UParT discriminants ({desc[:80]}...). Regenerate "
+                    "it with the current sfs-3d derive_wps.py (raw tagger outputs as inputs)."
+                )
+
+    def check(self):
+        """Load the file once (on the submission side), then drop it again."""
+        self._load()
+        self._cset = None
 
     @property
     def branches(self) -> list:
-        """NanoAOD Jet branches needed (besides pt)."""
-        return sorted(set(self.inputs.values()))
+        """Jet branches needed by ``tagging_bin`` (incl. pt)."""
+        self._load()
+        return [LEGACY_INPUTS.get(n, n) for n in self.input_names]
 
-    def scores_np(self, fields: dict) -> dict:
-        """Scores keyed by name from flat numpy arrays keyed by Jet branch name."""
-        ns = {
-            f"ak4_{key}": np.asarray(fields[branch], dtype=np.float64)
-            for key, branch in self.inputs.items()
-        }
-        ns["ak4_pt"] = np.asarray(fields["pt"], dtype=np.float64)
-        for key, code in self.derived:
-            ns[f"ak4_{key}"] = _evaluate(code, ns)
-        out = {}
-        for key, (code, rng) in self.scores.items():
-            x = np.broadcast_to(_evaluate(code, ns), ns["ak4_pt"].shape).copy()
-            if rng is not None:
-                lo, hi = float(rng[0]), float(rng[1])
-                x = np.where(x >= lo, x, lo)  # NaN -> lo
-                x = np.minimum(x, np.nextafter(hi, lo))
-            out[key] = x
-        return out
+    @property
+    def axes(self) -> list:
+        self._load()
+        if self.score_correctors:
+            return list(self.score_correctors)
+        return [n for n in self.input_names if n in LEGACY_INPUTS]
+
+    def _args(self, fields, names):
+        return [
+            np.asarray(fields[LEGACY_INPUTS.get(n, n)], dtype=np.float64) for n in names
+        ]
 
     def __call__(self, fields: dict) -> np.ndarray:
-        n = len(fields["pt"])
-        if n == 0:
+        """Bin index from flat numpy arrays keyed by Jet branch name."""
+        self._load()
+        if len(fields["pt"]) == 0:
             return np.zeros(0, dtype=np.int32)
-        scores = self.scores_np(fields)
-        scores["pt"] = np.asarray(fields["pt"], dtype=np.float64)
-        args = [scores[i.name] for i in self.corrector.inputs]
+        args = self._args(fields, self.input_names)
         return np.asarray(self.corrector.evaluate(*args)).astype(np.int32)
+
+    def scores(self, fields: dict) -> dict:
+        """Scores of the cascade {axis: array} from flat arrays keyed by branch name."""
+        self._load()
+        out = {}
+        for axis in self.axes:
+            if axis in self.score_correctors:
+                corr = self.score_correctors[axis]
+                args = self._args(fields, [i.name for i in corr.inputs])
+                if len(fields["pt"]) == 0:
+                    out[axis] = np.zeros(0)
+                else:
+                    out[axis] = np.asarray(corr.evaluate(*args), dtype=np.float64)
+            else:
+                out[axis] = np.asarray(fields[LEGACY_INPUTS[axis]], dtype=np.float64)
+        return out
+
+
+def _flat(jets):
+    """(flat jets, counts or None) for a jagged or a one-per-event jet collection."""
+    if jets.ndim > 1:
+        return ak.flatten(jets), ak.to_numpy(ak.num(jets, axis=1))
+    return jets, None
+
+
+def _unflat(values, counts):
+    return values if counts is None else ak.unflatten(values, counts)
 
 
 def jet_tagging_bin(jets, tagging: TaggingBin):
-    """``TaggingBin`` for a jagged coffea Jet collection; returns jagged tagID."""
+    """``TaggingBin`` for a coffea Jet collection (jagged or one jet per event)."""
     missing = set(tagging.branches) - set(jets.fields)
     if missing:
-        raise KeyError(
-            f"stag: {tagging.tagger} jet branches missing from input: {sorted(missing)}"
-        )
-    counts = ak.to_numpy(ak.num(jets, axis=1))
-    flat = {b: ak.to_numpy(ak.flatten(jets[b])) for b in tagging.branches + ["pt"]}
-    return ak.unflatten(tagging(flat), counts)
+        raise KeyError(f"stag: jet branches missing from input: {sorted(missing)}")
+    flat, counts = _flat(jets)
+    fields = {b: ak.to_numpy(flat[b]) for b in tagging.branches}
+    return _unflat(tagging(fields), counts)
+
+
+def nopid_discriminants(p: dict) -> dict:
+    """NoPIDParTAK4 discriminants from the class probabilities (unreweighted)."""
+    b, c = p["probb"] + p["probbb"], p["probc"] + p["probcc"]
+    s, ud, g = p["probs"], p["probud"], p["probg"]
+    with np.errstate(divide="ignore", invalid="ignore"):
+        out = {
+            "BvAll": b / (b + c + s + ud + g),
+            "CvNotB": c / (c + s + ud + g),
+            "SvUDG": s / (s + ud + g),
+            "SvUD": s / (s + ud),
+        }
+    return {k: np.nan_to_num(v, nan=-1.0) for k, v in out.items()}
+
+
+def stag_jet_fields(jets, tagging: TaggingBin, isRealData: bool) -> dict:
+    """
+    s-tagging fields of a coffea Jet collection (jagged or one jet per event), keyed by
+    field name: ``stagBin``, ``stagScore_<axis>``, the NoPIDParTAK4 discriminants
+    ``stagBvAll``, ``stagCvNotB``, ``stagSvUDG``, ``stagSvUD`` (if the class probabilities
+    are present) and, for MC, ``stagFlav`` (``stag_flavour``).
+    """
+    from BTVNanoCommissioning.utils.selection import stagflav
+
+    flat, counts = _flat(jets)
+    names = set(tagging.branches)
+    for corr in tagging.score_correctors.values():
+        names |= {i.name for i in corr.inputs}
+    missing = {LEGACY_INPUTS.get(n, n) for n in names} - set(jets.fields)
+    if missing:
+        raise KeyError(f"stag: jet branches missing from input: {sorted(missing)}")
+    fields = {LEGACY_INPUTS.get(n, n): ak.to_numpy(flat[LEGACY_INPUTS.get(n, n)]) for n in names}
+    out = {"stagBin": _unflat(tagging(fields), counts)}
+    for axis, v in tagging.scores(fields).items():
+        out[f"stagScore_{axis}"] = _unflat(v, counts)
+    probs = [f"btagNoPIDParTAK4{p}" for p in NOPID_PROBS]
+    if set(probs) <= set(jets.fields):
+        p = {k: ak.to_numpy(flat[b]).astype(np.float64) for k, b in zip(NOPID_PROBS, probs)}
+        for k, v in nopid_discriminants(p).items():
+            out[f"stag{k}"] = _unflat(v, counts)
+    if not isRealData and "nBHadrons" in jets.fields:
+        out["stagFlav"] = stagflav(jets)
+    return out
+
+
+def add_stag_fields(pruned_ev, collection: str, tagging: TaggingBin, isRealData: bool):
+    """Add the ``stag_jet_fields`` to ``pruned_ev[collection]`` (in place)."""
+    for name, values in stag_jet_fields(
+        pruned_ev[collection], tagging, isRealData
+    ).items():
+        pruned_ev[collection, name] = values
 
 
 # --------------------------------------------------------------------------------------

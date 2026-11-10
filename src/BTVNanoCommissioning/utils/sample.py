@@ -1103,3 +1103,13 @@ predefined_sample = {
         ],
     },
 }
+
+# s-tagging in the W+c, DY and tt e-mu SF regions: same samples as the 2D workflows
+for _s, _ref in (
+    ("stag_mu_Wc_s", "2D_mu_Wc_sf"),
+    ("stag_e_Wc_s", "2D_e_Wc_sf"),
+    ("stag_mu_DY_s", "2D_mu_DY_sf"),
+    ("stag_e_DY_s", "2D_e_DY_sf"),
+    ("stag_emu_ttdilep_s", "2D_emu_ttdilep_sf"),
+):
+    predefined_sample[_s] = predefined_sample[_ref]

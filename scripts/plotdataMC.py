@@ -7,7 +7,9 @@ import hist
 from coffea.util import load
 from matplotlib.offsetbox import AnchoredText
 
-plt.style.use(hep.style.ROOT)
+plt.style.use(hep.style.CMS)
+FONT_SIZE = 25
+plt.rcParams.update({"font.size": FONT_SIZE})
 
 from BTVNanoCommissioning.workflows import workflows
 from BTVNanoCommissioning.helpers.xs_scaler import collate, scaleSumW
@@ -24,6 +26,31 @@ from BTVNanoCommissioning.utils.plot_utils import (
     sample_mergemap,
     color_map,
 )
+from BTVNanoCommissioning.helpers.stag_helpers import STAG_FLAVOURS
+
+
+def flav_components(h, sel, flav_set, hf_split=False):
+    """[(flavour label, histogram)] of the MC flavour split. Histograms with the
+    s-tagging flavour axis (stag_* workflows: b, bb, c, cc, s, ud, g, PU) are shown as
+    b (b+bb), c (c+cc), s, ud, g, PU, or with bb and cc separately (hf_split); the
+    other histograms are split by flav_set, one entry per flav-axis bin."""
+    sel = dict(sel)
+    if len(h.axes["flav"]) == len(STAG_FLAVOURS):
+        if hf_split:
+            groups = [("b", [0]), ("bb", [1]), ("c", [2]), ("cc", [3])]
+        else:
+            groups = [("b", [0, 1]), ("c", [2, 3])]
+        groups += [("s", [4]), ("ud", [5]), ("g", [6]), ("PU", [7])]
+    else:
+        groups = [(t, [i]) for i, t in enumerate(flav_set)]
+    out = []
+    for label, indices in groups:
+        comp = None
+        for i in indices:
+            sel["flav"] = i
+            comp = h[sel] if comp is None else comp + h[sel]
+        out.append((label, comp))
+    return out
 
 bininfo = get_definitions()
 SV_bininfo = get_definitions(include_definitions=["SV"])
@@ -87,6 +114,11 @@ def get_parser():
         help="y-range for ratio plot, default is 0.5 to 1.5. Usage: --ratio-range ymin,ymax",
     )
     parser.add_argument("--ext", type=str, default="", help="Prefix name")
+    parser.add_argument(
+        "--hf-split",
+        action="store_true",
+        help="s-tagging flavours (stag_* workflows): show bb and cc separately from b and c",
+    )
     parser.add_argument(
         "--autorebin",
         default=None,
@@ -218,9 +250,9 @@ def main(args):
 
     if "emctag" in args.phase:
         input_txt += r" (e$\mu$)"
-    elif "ectag" in args.phase or "2D_e_" in args.phase:
+    elif "ectag" in args.phase or "2D_e_" in args.phase or "stag_e_" in args.phase:
         input_txt += " (e)"
-    elif args.phase == "ttdilep_sf":
+    elif args.phase == "ttdilep_sf" or "emu_ttdilep" in args.phase:
         input_txt += r" (e$\mu$)"
     elif args.phase == "QCD" or "qg" in args.phase.lower():
         pass
@@ -408,13 +440,16 @@ def main(args):
                     continue
                 elif args.split == "sample_flav" and sample == "mc":
                     continue
-                for i, t in enumerate(flav_set):
-                    splitflav_axis["flav"] = i
-                    splitflav_stack.append(collated[sample][discr][splitflav_axis])
+                for i, (t, hcomp) in enumerate(
+                    flav_components(
+                        collated[sample][discr], splitflav_axis, flav_set, args.hf_split
+                    )
+                ):
+                    splitflav_stack.append(hcomp)
                     if args.split == "flavor":
                         labels.append(t)
                         color_config["color"].append(color_map[t])
-                        color_config["alpha"].append(1.0)
+                        color_config["alpha"].append(0.55 if t in ("bb", "cc") else 1.0)
                     else:
                         labels.append(f"{sample} ({t})")
                         color_config["color"].append(color_map[sample])
@@ -501,13 +536,16 @@ def main(args):
                     continue
                 elif args.split == "sample_flav" and sample == "mc":
                     continue
-                for i, t in enumerate(flav_set):
-                    splitflav_axis["flav"] = i
-                    splitflav_stack.append(collated[sample][discr][splitflav_axis])
+                for i, (t, hcomp) in enumerate(
+                    flav_components(
+                        collated[sample][discr], splitflav_axis, flav_set, args.hf_split
+                    )
+                ):
+                    splitflav_stack.append(hcomp)
                     if args.split == "flavor":
                         labels.append(t)
                         color_config["color"].append(color_map[t])
-                        color_config["alpha"].append(1.0)
+                        color_config["alpha"].append(0.55 if t in ("bb", "cc") else 1.0)
                     else:
                         labels.append(f"{sample} ({t})")
                         color_config["color"].append(color_map[sample])
@@ -555,14 +593,16 @@ def main(args):
                     continue
                 elif args.split == "sample_flav" and sample == "mc":
                     continue
-                for i, t in enumerate(flav_set):
-                    splitflav_axis["flav"] = i
-                    splitflav_stack.append(collated[sample][discr][splitflav_axis])
-
+                for i, (t, hcomp) in enumerate(
+                    flav_components(
+                        collated[sample][discr], splitflav_axis, flav_set, args.hf_split
+                    )
+                ):
+                    splitflav_stack.append(hcomp)
                     if args.split == "flavor":
                         labels.append(t)
                         color_config["color"].append(color_map[t])
-                        color_config["alpha"].append(1.0)
+                        color_config["alpha"].append(0.55 if t in ("bb", "cc") else 1.0)
                     else:
                         labels.append(f"{sample} ({t})")
                         color_config["color"].append(color_map[sample])
@@ -689,6 +729,8 @@ def main(args):
                 and (SV_bininfo[discr]["inputVar_units"] == "")
                 else SV_bininfo[discr]["displayname"]
             )
+        elif discr.startswith(("stagdisc_", "stagscore_")):
+            xlabel = collated["data"][discr].axes[-1].label
         else:
             xlabel = axes_name(discr)
 
@@ -783,7 +825,8 @@ def main(args):
                 f"plot/{args.phase}_{args.ext}/unc_{discr}_inclusive{scale}_{name}.{filetype}",
             )
             fig.savefig(
-                f"plot/{args.phase}_{args.ext}/unc_{discr}_inclusive{scale}_{name}.{filetype}"
+                f"plot/{args.phase}_{args.ext}/unc_{discr}_inclusive{scale}_{name}.{filetype}",
+                bbox_inches="tight",
             )
 
         plt.close(fig)

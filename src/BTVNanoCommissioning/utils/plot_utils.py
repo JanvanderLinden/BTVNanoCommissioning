@@ -35,6 +35,9 @@ color_map = {
     "other": "#717581",  # grey
     "c": "#fcb302",  # yellow
     "b": "#ed1e02",  # red
+    # s-tagging flavour split: bb/cc in the b/c colour, drawn lighter
+    "bb": "#ed1e02",
+    "cc": "#fcb302",
 }
 sample_mergemap = {
     # ttbar

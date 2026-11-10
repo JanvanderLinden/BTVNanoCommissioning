@@ -137,6 +137,24 @@ workflows["stag_e_tt1L_s_spanet_data"] = partial(
     STagTT1LProcessor, selectionModifier="semittE_s", spanet_data=True
 )
 
+# s-tagging (sfs-3d WPs) in the W+c, DY and tt e-mu SF regions: the 2D selections with
+# the s-tag bins, scores and flavours instead of the 2D tag categories
+workflows["stag_mu_Wc_s"] = partial(
+    _2DWcValidSFProcessor, selectionModifier="WcM_2D", stag=True
+)
+workflows["stag_e_Wc_s"] = partial(
+    _2DWcValidSFProcessor, selectionModifier="WcE_2D", stag=True
+)
+workflows["stag_mu_DY_s"] = partial(
+    CTAGDYValidSFProcessor, selectionModifier="DYM_2D", stag=True
+)
+workflows["stag_e_DY_s"] = partial(
+    CTAGDYValidSFProcessor, selectionModifier="DYE_2D", stag=True
+)
+workflows["stag_emu_ttdilep_s"] = partial(
+    TTdilepValidSFProcessor, selectionModifier="ttdilep_sf_2D", stag=True
+)
+
 # QCD
 workflows["QCD_sf"] = QCDValidProcessor
 workflows["QCD_smu_sf"] = QCDsmuValidProcessor

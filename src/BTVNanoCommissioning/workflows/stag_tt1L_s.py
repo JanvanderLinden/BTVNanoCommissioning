@@ -188,28 +188,13 @@ class NanoProcessor(processor.ProcessorABC):
         )
 
         # external inputs: fail early on the submission side if they are missing
-        self.tagging_wps_file = self.cfg["tagging_wps"]
-        self.tagging_scores_file = self.cfg["tagging_scores"]
-        self._tag_corrector = None
+        self.tagging = TaggingBin(self.cfg["tagging_wps"])
         if self.evaluate_spanet:
-            TaggingBin(self.tagging_wps_file, self.tagging_scores_file)
+            self.tagging.check()
             self.spanet = SpanetEvaluator(self.cfg["spanet_model"])
             self.spanet.check()  # sessions are recreated lazily on the workers
         else:
             self.spanet = None
-
-    def __getstate__(self):
-        state = dict(self.__dict__)
-        state["_tag_corrector"] = None
-        return state
-
-    @property
-    def tag_corrector(self):
-        if self._tag_corrector is None:
-            self._tag_corrector = TaggingBin(
-                self.tagging_wps_file, self.tagging_scores_file
-            )
-        return self._tag_corrector
 
     @property
     def accumulator(self):
@@ -518,7 +503,7 @@ class NanoProcessor(processor.ProcessorABC):
         recon = None
         if self.evaluate_spanet:
             jet["tagID"] = pad_np(
-                jet_tagging_bin(jets_ev, self.tag_corrector), MAX_JETS, -1, np.int32
+                jet_tagging_bin(jets_ev, self.tagging), MAX_JETS, -1, np.int32
             )
             if not isRealData:
                 jet["flav"] = custom_flav(

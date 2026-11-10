@@ -468,6 +468,38 @@ def btag_wp(jets, year, campaign, tagger, borc, wp):
     return jet_mask
 
 
+def stagflav(jets):
+    """s-tagging MC jet flavour (int8 per jet), as in the sfs-3d WP derivation:
+
+    0 = b  (hadronFlavour==5, nBHadrons<=1)
+    1 = bb (hadronFlavour==5, nBHadrons>1)
+    2 = c  (hadronFlavour==4, nCHadrons<=1)
+    3 = cc (hadronFlavour==4, nCHadrons>1)
+    4 = s  (light, abs(partonFlavour)==3)
+    5 = ud (light, abs(partonFlavour) in {1,2})
+    6 = g  (light, partonFlavour==21)
+    7 = PU (no gen-jet match, genJetIdx<0, regardless of the stored flavours, and
+        every jet not covered above)
+
+    light: hadronFlavour==0 and no B or C hadrons.
+    """
+    hflav = jets.hadronFlavour
+    nb = jets.nBHadrons
+    nc = jets.nCHadrons
+    apflav = abs(jets.partonFlavour)
+    light = (hflav == 0) & (nb == 0) & (nc == 0)
+    flav = ak.full_like(hflav, 7, dtype=np.int8)
+    flav = ak.where((hflav == 5) & (nb <= 1), 0, flav)
+    flav = ak.where((hflav == 5) & (nb > 1), 1, flav)
+    flav = ak.where((hflav == 4) & (nc <= 1), 2, flav)
+    flav = ak.where((hflav == 4) & (nc > 1), 3, flav)
+    flav = ak.where(light & (apflav == 3), 4, flav)
+    flav = ak.where(light & ((apflav == 1) | (apflav == 2)), 5, flav)
+    flav = ak.where(light & (jets.partonFlavour == 21), 6, flav)
+    flav = ak.where(jets.genJetIdx < 0, 7, flav)
+    return ak.values_astype(flav, np.int8)
+
+
 def fineflav(jets):
     """Fine-grained MC jet flavour (int8 per jet), Run 2 SFbc convention:
 

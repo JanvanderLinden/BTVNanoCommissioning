@@ -189,6 +189,40 @@ arraySchema = {
     ],
 }
 
+# stag_* workflows (s-tagging, sfs-3d WPs): SLIM without the 2D tag counters, plus the
+# s-tag bin, scores and flavour of the probe jets (helpers/stag_helpers.add_stag_fields)
+# and the raw tagger outputs the WP json takes as inputs
+_STAG_DROP = ("passTag_", "nbjet_", "ncjet_")
+arraySchema["SLIM_STAG"] = [
+    b for b in arraySchema["SLIM"] if not b.startswith(_STAG_DROP)
+] + [
+    "SelJet_stagBin",
+    "SelJet_stagFlav",  # MC only
+    "SelJet_stagScore_bvall",
+    "SelJet_stagScore_cvnotb",
+    "SelJet_stagScore_svudg",
+    "SelJet_stagBvAll",
+    "SelJet_stagCvNotB",
+    "SelJet_stagSvUDG",
+    "SelJet_stagSvUD",
+    "SelJet_btagNoPIDParTAK4probb",
+    "SelJet_btagNoPIDParTAK4probbb",
+    "SelJet_btagNoPIDParTAK4probc",
+    "SelJet_btagNoPIDParTAK4probcc",
+    "SelJet_btagNoPIDParTAK4probs",
+    "SelJet_btagNoPIDParTAK4probud",
+    "SelJet_btagNoPIDParTAK4probg",
+    "SelJet_btagUParTAK4B",
+    "SelJet_btagUParTAK4CvNotB",
+    "SelJet_btagUParTAK4SvUDG",
+    "SelJet_btagUParTAK4UDG",
+    "SelJet_btagUParTAK4QvG",
+    "SelJet_nConstituents",
+    "SelJet_nBHadrons",
+    "SelJet_nCHadrons",
+    "SelJet_genJetIdx",
+]
+
 
 def _write_tree(fout, name, data):
     """Write a dict of arrays as a TTree.

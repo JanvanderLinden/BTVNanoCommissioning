@@ -151,6 +151,69 @@ def _fill_sf2d_histograms(output, seljets, genflavor, weight, syst):
             )
 
 
+STAG_PREFIXES = ("stagtpl_", "stagscore_", "stagdisc_")
+
+
+def _fill_stag_histograms(output, jets, weight, syst, osss=None):
+    """Fill the s-tagging histograms (histograms/stag.py) present in `output` for a
+    jet collection that carries the stag fields (helpers/stag_helpers.add_stag_fields),
+    jagged (several jets per event) or one jet per event. `weight`, `syst` and `osss`
+    are per event (or scalar); data jets (no stagFlav) are filled with flav 0.
+    svmass is set to -1 where nSVs == 0, as for the 2D templates."""
+    names = [k for k in output if k.startswith(STAG_PREFIXES)]
+    if not names or "stagBin" not in jets.fields:
+        return
+    jagged = jets.ndim > 1
+
+    def flat(x):
+        # per-jet field -> flat numpy array
+        return np.asarray(ak.to_numpy(ak.flatten(x) if jagged else x))
+
+    pt = flat(jets.pt)
+    n = len(pt)
+    if n == 0:
+        return
+    if jagged:
+        w = np.asarray(ak.to_numpy(ak.flatten(ak.broadcast_arrays(weight, jets.pt)[0])))
+    else:
+        w = np.asarray(weight)
+    label = syst if isinstance(syst, str) else syst[0]
+    common = {
+        "syst": np.full(n, label),
+        "flav": flat(jets.stagFlav) if "stagFlav" in jets.fields else np.zeros(n, int),
+    }
+    if osss is not None:
+        if jagged:
+            common["osss"] = np.asarray(
+                ak.to_numpy(ak.flatten(ak.broadcast_arrays(osss, jets.pt)[0]))
+            )
+        else:
+            common["osss"] = np.asarray(ak.to_numpy(osss))
+    tagcat = flat(jets.stagBin)
+    for name in names:
+        h = output[name]
+        axis_names = (h.hist if isinstance(h, _FillRecorder) else h).axes.name
+        kw = {k: v for k, v in common.items() if k in axis_names}
+        if name.startswith("stagtpl_"):
+            var = name[len("stagtpl_") :]
+            if var not in jets.fields:
+                continue
+            values = flat(jets[var])
+            if var == "svmass" and "nSVs" in jets.fields:
+                values = np.where(flat(jets.nSVs) == 0, -1.0, values)
+            h.fill(tagcat=tagcat, pt=pt, weight=w, **kw, **{var: values})
+            continue
+        if name.startswith("stagscore_"):
+            field = "stagScore_" + name[len("stagscore_") :]
+        else:
+            disc = name[len("stagdisc_") :]
+            field = (
+                f"btagNoPIDParTAK4{disc}" if disc.startswith("prob") else f"stag{disc}"
+            )
+        if field in jets.fields:
+            h.fill(discr=flat(jets[field]), weight=w, **kw)
+
+
 def histogrammer(
     jet_fields=None,
     obj_list=[],
@@ -831,6 +894,9 @@ def histo_writter(pruned_ev, output, weights, systematics, isSyst, SF_map):
         # it doesn't go through histo_writer.
         if any(k.startswith("sf2d_") for k in output.keys()):
             _fill_sf2d_histograms(output, pruned_ev.SelJet, genflavor, weight, syst)
+        # s-tagging templates and discriminants (histograms/stag.py), same jets
+        if any(k.startswith(STAG_PREFIXES) for k in output.keys()):
+            _fill_stag_histograms(output, pruned_ev.SelJet, weight, syst)
 
     variations = set(weights.variations)
 

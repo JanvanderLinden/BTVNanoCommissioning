@@ -26,6 +26,11 @@ from BTVNanoCommissioning.utils.histogramming.histogrammer import (
     histo_writer,
 )
 from BTVNanoCommissioning.utils.array_writer import array_writer
+from BTVNanoCommissioning.helpers.stag_helpers import (
+    TaggingBin,
+    get_stag_config,
+    add_stag_fields,
+)
 from BTVNanoCommissioning.utils.selection import (
     HLT_helper,
     jet_id,
@@ -52,6 +57,7 @@ class NanoProcessor(processor.ProcessorABC):
         chunksize=75000,
         ttbar_reweights="none",
         selectionModifier="tt_dilep",
+        stag=False,
     ):
         self._year = year
         self._campaign = campaign
@@ -65,6 +71,12 @@ class NanoProcessor(processor.ProcessorABC):
         self.selMod = selectionModifier
         ## Load corrections
         self.SF_map = load_SF(self._year, self._campaign, self.selMod)
+        # stag_* workflows: s-tag bins, scores and flavours of the sfs-3d WPs
+        # (helpers/stag_helpers.py) instead of the 2D tag categories
+        self.stag = stag
+        if stag:
+            self.tagging = TaggingBin(get_stag_config(campaign)["tagging_wps"])
+            self.tagging.check()
 
     @property
     def accumulator(self):
@@ -95,11 +107,11 @@ class NanoProcessor(processor.ProcessorABC):
         hist_collections = ["common", "fourvec", "ttdilep"]
         if self.selMod == "ttdilep_sf_2D":
             objs.append("MET")
-            hist_collections.append("SF2D")
+            hist_collections.append("STAG" if self.stag else "SF2D")
         output = {}
         if not self.noHist:
             output = histogrammer(
-                events.Jet.fields,
+                [f for f in events.Jet.fields if not (self.stag and "2Dbin" in f)],
                 obj_list=objs,
                 hist_collections=hist_collections,
                 njet=2,
@@ -318,6 +330,8 @@ class NanoProcessor(processor.ProcessorABC):
             and "nBHadrons" in pruned_ev.SelJet.fields
         ):
             pruned_ev["SelJet", "fineFlav"] = fineflav(pruned_ev.SelJet)
+        if self.stag:
+            add_stag_fields(pruned_ev, "SelJet", self.tagging, isRealData)
 
         if self.selMod == "ttdilep_sf_2D":
             pruned_ev["MET"] = event_MET[event_level]
@@ -355,7 +369,7 @@ class NanoProcessor(processor.ProcessorABC):
                 systematics,
                 dataset,
                 isRealData,
-                schema="SLIM",
+                schema="SLIM_STAG" if self.stag else "SLIM",
                 perJet=(self.selMod == "ttdilep_sf_2D"),
             )
         return {dataset: output}

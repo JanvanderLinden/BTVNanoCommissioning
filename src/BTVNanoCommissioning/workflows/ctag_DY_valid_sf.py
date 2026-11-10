@@ -22,6 +22,11 @@ from BTVNanoCommissioning.utils.histogramming.histogrammer import (
     histo_writer,
 )
 from BTVNanoCommissioning.utils.array_writer import array_writer
+from BTVNanoCommissioning.helpers.stag_helpers import (
+    TaggingBin,
+    get_stag_config,
+    add_stag_fields,
+)
 from BTVNanoCommissioning.utils.selection import (
     HLT_helper,
     jet_id,
@@ -47,6 +52,7 @@ class NanoProcessor(processor.ProcessorABC):
         chunksize=75000,
         ttbar_reweights="none",
         selectionModifier="DYM_ctag",
+        stag=False,
     ):
         self._year = year
         self._campaign = campaign
@@ -60,6 +66,12 @@ class NanoProcessor(processor.ProcessorABC):
         self.selMod = selectionModifier
         # Load corrections
         self.SF_map = load_SF(self._year, self._campaign, self.selMod)
+        # stag_* workflows: s-tag bins, scores and flavours of the sfs-3d WPs
+        # (helpers/stag_helpers.py) instead of the 2D tag categories
+        self.stag = stag
+        if stag:
+            self.tagging = TaggingBin(get_stag_config(campaign)["tagging_wps"])
+            self.tagging.check()
 
     @property
     def accumulator(self):
@@ -100,7 +112,7 @@ class NanoProcessor(processor.ProcessorABC):
         njet_hist = 1
         if "2D" in self.selMod:
             hists.append("DY_2D")
-            hists.append("SF2D")
+            hists.append("STAG" if self.stag else "SF2D")
             # also histogram jet1, jet2 (with tagging categories) so they
             # can be used as additional categories in the global SF fit
             obj_list = obj_list + ["jet1", "jet2"]
@@ -109,7 +121,9 @@ class NanoProcessor(processor.ProcessorABC):
         if not self.noHist:
             if "QG" not in self.selMod:
                 output = histogrammer(
-                    jet_fields=events.Jet.fields,
+                    jet_fields=[
+                        f for f in events.Jet.fields if not (self.stag and "2Dbin" in f)
+                    ],
                     obj_list=obj_list,
                     hist_collections=hists,
                     include_m=isMu,
@@ -120,7 +134,9 @@ class NanoProcessor(processor.ProcessorABC):
                 )
             else:
                 output = histogrammer(
-                    jet_fields=events.Jet.fields,
+                    jet_fields=[
+                        f for f in events.Jet.fields if not (self.stag and "2Dbin" in f)
+                    ],
                     obj_list=[],
                     hist_collections=["qgtag"],
                     axes_collections=["qgtag"],
@@ -223,7 +239,8 @@ class NanoProcessor(processor.ProcessorABC):
         if "QG" in self.selMod:
             jetmask = jet_id(events, self._campaign, max_eta=5.0, min_pt=20.0)
         else:
-            jetmask = jet_id(events, self._campaign)
+            # stag_* workflows: pT > 25 GeV as for the s-tagging WPs and templates
+            jetmask = jet_id(events, self._campaign, min_pt=25 if self.stag else 20)
 
         if "2D" in self.selMod:
             # clean against the shared loose veto-lepton collections (Run 2
@@ -399,6 +416,8 @@ class NanoProcessor(processor.ProcessorABC):
         # leading, 1 = subleading, ...), not the original NanoAOD Jet index
         if "QG" not in self.selMod:
             pruned_ev["SelJet", "jetIdx"] = ak.local_index(pruned_ev.SelJet, axis=1)
+        if self.stag and "QG" not in self.selMod:
+            add_stag_fields(pruned_ev, "SelJet", self.tagging, isRealData)
 
         ####################
         #     Output       #
@@ -468,7 +487,7 @@ class NanoProcessor(processor.ProcessorABC):
                 systematics,
                 dataset,
                 isRealData,
-                schema="SLIM",  # doOnly=["SelJet","njet","PuppiMET"]
+                schema="SLIM_STAG" if self.stag else "SLIM",
                 perJet=("QG" not in self.selMod),
             )
 
