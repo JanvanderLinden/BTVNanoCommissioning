@@ -61,7 +61,9 @@ _RUN3_2024 = {
 # private NanoAODv15 tuples (CustomSummer24 MC, CustomSummer25 data): NoPIDParTAK4 WPs
 _RUN3_2024_NOPID = dict(
     _RUN3_2024,
-    tagging_wps=f"{_DATA_DIR}/CustomSummer24/stag/stag-wp-NoPIDParTAK4.json",
+    # B_derive_wps.sh with wp/configs/stag_2024_UParTNoPID.yml: pt-inclusive WPs, svudg
+    # reweighted (ud/g)
+    tagging_wps=f"{_DATA_DIR}/CustomSummer24/stag/wp_v1_ptincl_rew_svudg.json",
 )
 STAG_CONFIG = {
     "Summer24": _RUN3_2024,
