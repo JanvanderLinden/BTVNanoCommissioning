@@ -1,0 +1,351 @@
+{
+  "schema_version": 2,
+  "description": "s-tagging working points (NoPIDParTAK4). The 'svudg' score is reweighted (ud/g, x = 1).",
+  "corrections": [
+    {
+      "name": "tagging_bin",
+      "description": "Exclusive tagging bin index (NoPIDParTAK4). Mapping: 0=BT, 1=BL, 2=CT, 3=CL, 4=L, 5=SL, 6=SM, 7=ST. Inputs: jet pt and the raw tagger outputs; scores (ak4_<x> = Jet_<x>): bvall = ak4_bvall; cvnotb = ak4_cvnotb; svudg = (ak4_probs) / ((ak4_probs) + (2 * (ak4_probud) + 0 * (ak4_probg)) + 1e-10). The 'svudg' score is reweighted (ud/g, x = 1).",
+      "version": 1,
+      "inputs": [
+        {
+          "name": "pt",
+          "type": "real",
+          "description": "jet pt [GeV]"
+        },
+        {
+          "name": "btagNoPIDParTAK4probb",
+          "type": "real",
+          "description": "Jet_btagNoPIDParTAK4probb (NanoAOD)"
+        },
+        {
+          "name": "btagNoPIDParTAK4probbb",
+          "type": "real",
+          "description": "Jet_btagNoPIDParTAK4probbb (NanoAOD)"
+        },
+        {
+          "name": "btagNoPIDParTAK4probc",
+          "type": "real",
+          "description": "Jet_btagNoPIDParTAK4probc (NanoAOD)"
+        },
+        {
+          "name": "btagNoPIDParTAK4probcc",
+          "type": "real",
+          "description": "Jet_btagNoPIDParTAK4probcc (NanoAOD)"
+        },
+        {
+          "name": "btagNoPIDParTAK4probg",
+          "type": "real",
+          "description": "Jet_btagNoPIDParTAK4probg (NanoAOD)"
+        },
+        {
+          "name": "btagNoPIDParTAK4probs",
+          "type": "real",
+          "description": "Jet_btagNoPIDParTAK4probs (NanoAOD)"
+        },
+        {
+          "name": "btagNoPIDParTAK4probud",
+          "type": "real",
+          "description": "Jet_btagNoPIDParTAK4probud (NanoAOD)"
+        }
+      ],
+      "output": {
+        "name": "bin",
+        "type": "real",
+        "description": "tagging bin index"
+      },
+      "data": {
+        "nodetype": "binning",
+        "input": "pt",
+        "edges": [
+          25.0,
+          250.0
+        ],
+        "flow": "clamp",
+        "content": [
+          {
+            "nodetype": "transform",
+            "input": "pt",
+            "rule": {
+              "nodetype": "formula",
+              "parser": "TFormula",
+              "expression": "max(0.0, min(((x[0] + x[1]) / (x[0] + x[1] + x[2] + x[3] + x[4] + x[5] + x[6])), 0.9999999999999999))",
+              "variables": [
+                "btagNoPIDParTAK4probb",
+                "btagNoPIDParTAK4probbb",
+                "btagNoPIDParTAK4probc",
+                "btagNoPIDParTAK4probcc",
+                "btagNoPIDParTAK4probg",
+                "btagNoPIDParTAK4probs",
+                "btagNoPIDParTAK4probud"
+              ]
+            },
+            "content": {
+              "nodetype": "binning",
+              "input": "pt",
+              "edges": [
+                0.0,
+                0.7325,
+                0.9912000000000001,
+                1.0
+              ],
+              "flow": "clamp",
+              "content": [
+                {
+                  "nodetype": "transform",
+                  "input": "pt",
+                  "rule": {
+                    "nodetype": "formula",
+                    "parser": "TFormula",
+                    "expression": "max(0.0, min(((x[2] + x[3]) / (x[2] + x[3] + x[4] + x[5] + x[6])), 0.9999999999999999))",
+                    "variables": [
+                      "btagNoPIDParTAK4probb",
+                      "btagNoPIDParTAK4probbb",
+                      "btagNoPIDParTAK4probc",
+                      "btagNoPIDParTAK4probcc",
+                      "btagNoPIDParTAK4probg",
+                      "btagNoPIDParTAK4probs",
+                      "btagNoPIDParTAK4probud"
+                    ]
+                  },
+                  "content": {
+                    "nodetype": "binning",
+                    "input": "pt",
+                    "edges": [
+                      0.0,
+                      0.34425,
+                      0.8925000000000001,
+                      1.0
+                    ],
+                    "flow": "clamp",
+                    "content": [
+                      {
+                        "nodetype": "transform",
+                        "input": "pt",
+                        "rule": {
+                          "nodetype": "formula",
+                          "parser": "TFormula",
+                          "expression": "max(0.0, min((x[5]) / ((x[5]) + (2 * (x[6]) + 0 * (x[4])) + 1e-10), 0.9999999999999999))",
+                          "variables": [
+                            "btagNoPIDParTAK4probb",
+                            "btagNoPIDParTAK4probbb",
+                            "btagNoPIDParTAK4probc",
+                            "btagNoPIDParTAK4probcc",
+                            "btagNoPIDParTAK4probg",
+                            "btagNoPIDParTAK4probs",
+                            "btagNoPIDParTAK4probud"
+                          ]
+                        },
+                        "content": {
+                          "nodetype": "binning",
+                          "input": "pt",
+                          "edges": [
+                            0.0,
+                            0.07525,
+                            0.095,
+                            0.13870000000000002,
+                            1.0
+                          ],
+                          "flow": "clamp",
+                          "content": [
+                            4.0,
+                            5.0,
+                            6.0,
+                            7.0
+                          ]
+                        }
+                      },
+                      3.0,
+                      2.0
+                    ]
+                  }
+                },
+                1.0,
+                0.0
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "score_bvall",
+      "description": "B vs. all: ak4_bvall, clamped into the axis range [0.0, 1.0] as for the WPs",
+      "version": 1,
+      "inputs": [
+        {
+          "name": "btagNoPIDParTAK4probb",
+          "type": "real",
+          "description": "Jet_btagNoPIDParTAK4probb (NanoAOD)"
+        },
+        {
+          "name": "btagNoPIDParTAK4probbb",
+          "type": "real",
+          "description": "Jet_btagNoPIDParTAK4probbb (NanoAOD)"
+        },
+        {
+          "name": "btagNoPIDParTAK4probc",
+          "type": "real",
+          "description": "Jet_btagNoPIDParTAK4probc (NanoAOD)"
+        },
+        {
+          "name": "btagNoPIDParTAK4probcc",
+          "type": "real",
+          "description": "Jet_btagNoPIDParTAK4probcc (NanoAOD)"
+        },
+        {
+          "name": "btagNoPIDParTAK4probg",
+          "type": "real",
+          "description": "Jet_btagNoPIDParTAK4probg (NanoAOD)"
+        },
+        {
+          "name": "btagNoPIDParTAK4probs",
+          "type": "real",
+          "description": "Jet_btagNoPIDParTAK4probs (NanoAOD)"
+        },
+        {
+          "name": "btagNoPIDParTAK4probud",
+          "type": "real",
+          "description": "Jet_btagNoPIDParTAK4probud (NanoAOD)"
+        }
+      ],
+      "output": {
+        "name": "bvall",
+        "type": "real"
+      },
+      "data": {
+        "nodetype": "formula",
+        "parser": "TFormula",
+        "expression": "max(0.0, min(((x[0] + x[1]) / (x[0] + x[1] + x[2] + x[3] + x[4] + x[5] + x[6])), 0.9999999999999999))",
+        "variables": [
+          "btagNoPIDParTAK4probb",
+          "btagNoPIDParTAK4probbb",
+          "btagNoPIDParTAK4probc",
+          "btagNoPIDParTAK4probcc",
+          "btagNoPIDParTAK4probg",
+          "btagNoPIDParTAK4probs",
+          "btagNoPIDParTAK4probud"
+        ]
+      }
+    },
+    {
+      "name": "score_cvnotb",
+      "description": "C vs. not-B: ak4_cvnotb, clamped into the axis range [0.0, 1.0] as for the WPs",
+      "version": 1,
+      "inputs": [
+        {
+          "name": "btagNoPIDParTAK4probb",
+          "type": "real",
+          "description": "Jet_btagNoPIDParTAK4probb (NanoAOD)"
+        },
+        {
+          "name": "btagNoPIDParTAK4probbb",
+          "type": "real",
+          "description": "Jet_btagNoPIDParTAK4probbb (NanoAOD)"
+        },
+        {
+          "name": "btagNoPIDParTAK4probc",
+          "type": "real",
+          "description": "Jet_btagNoPIDParTAK4probc (NanoAOD)"
+        },
+        {
+          "name": "btagNoPIDParTAK4probcc",
+          "type": "real",
+          "description": "Jet_btagNoPIDParTAK4probcc (NanoAOD)"
+        },
+        {
+          "name": "btagNoPIDParTAK4probg",
+          "type": "real",
+          "description": "Jet_btagNoPIDParTAK4probg (NanoAOD)"
+        },
+        {
+          "name": "btagNoPIDParTAK4probs",
+          "type": "real",
+          "description": "Jet_btagNoPIDParTAK4probs (NanoAOD)"
+        },
+        {
+          "name": "btagNoPIDParTAK4probud",
+          "type": "real",
+          "description": "Jet_btagNoPIDParTAK4probud (NanoAOD)"
+        }
+      ],
+      "output": {
+        "name": "cvnotb",
+        "type": "real"
+      },
+      "data": {
+        "nodetype": "formula",
+        "parser": "TFormula",
+        "expression": "max(0.0, min(((x[2] + x[3]) / (x[2] + x[3] + x[4] + x[5] + x[6])), 0.9999999999999999))",
+        "variables": [
+          "btagNoPIDParTAK4probb",
+          "btagNoPIDParTAK4probbb",
+          "btagNoPIDParTAK4probc",
+          "btagNoPIDParTAK4probcc",
+          "btagNoPIDParTAK4probg",
+          "btagNoPIDParTAK4probs",
+          "btagNoPIDParTAK4probud"
+        ]
+      }
+    },
+    {
+      "name": "score_svudg",
+      "description": "S vs. UDG (ud/g reweighted, x = 1.000): (ak4_probs) / ((ak4_probs) + (2 * (ak4_probud) + 0 * (ak4_probg)) + 1e-10), clamped into the axis range [0.0, 1.0] as for the WPs",
+      "version": 1,
+      "inputs": [
+        {
+          "name": "btagNoPIDParTAK4probb",
+          "type": "real",
+          "description": "Jet_btagNoPIDParTAK4probb (NanoAOD)"
+        },
+        {
+          "name": "btagNoPIDParTAK4probbb",
+          "type": "real",
+          "description": "Jet_btagNoPIDParTAK4probbb (NanoAOD)"
+        },
+        {
+          "name": "btagNoPIDParTAK4probc",
+          "type": "real",
+          "description": "Jet_btagNoPIDParTAK4probc (NanoAOD)"
+        },
+        {
+          "name": "btagNoPIDParTAK4probcc",
+          "type": "real",
+          "description": "Jet_btagNoPIDParTAK4probcc (NanoAOD)"
+        },
+        {
+          "name": "btagNoPIDParTAK4probg",
+          "type": "real",
+          "description": "Jet_btagNoPIDParTAK4probg (NanoAOD)"
+        },
+        {
+          "name": "btagNoPIDParTAK4probs",
+          "type": "real",
+          "description": "Jet_btagNoPIDParTAK4probs (NanoAOD)"
+        },
+        {
+          "name": "btagNoPIDParTAK4probud",
+          "type": "real",
+          "description": "Jet_btagNoPIDParTAK4probud (NanoAOD)"
+        }
+      ],
+      "output": {
+        "name": "svudg",
+        "type": "real"
+      },
+      "data": {
+        "nodetype": "formula",
+        "parser": "TFormula",
+        "expression": "max(0.0, min((x[5]) / ((x[5]) + (2 * (x[6]) + 0 * (x[4])) + 1e-10), 0.9999999999999999))",
+        "variables": [
+          "btagNoPIDParTAK4probb",
+          "btagNoPIDParTAK4probbb",
+          "btagNoPIDParTAK4probc",
+          "btagNoPIDParTAK4probcc",
+          "btagNoPIDParTAK4probg",
+          "btagNoPIDParTAK4probs",
+          "btagNoPIDParTAK4probud"
+        ]
+      }
+    }
+  ]
+}

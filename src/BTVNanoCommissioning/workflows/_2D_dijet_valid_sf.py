@@ -1,5 +1,5 @@
 import awkward as ak, numpy as np
-import correctionlib
+from BTVNanoCommissioning.helpers import correctionlib_compat
 import os
 from coffea import processor
 
@@ -417,7 +417,7 @@ class NanoProcessor(processor.ProcessorABC):
                         f"Prescale weights not available for {trg} in {self._year}. "
                         "Please run `scripts/dump_prescale.py`."
                     )
-                pseval = correctionlib.CorrectionSet.from_file(psfile)
+                pseval = correctionlib_compat.from_file(psfile)
                 thisps = pseval["prescaleWeight"].evaluate(
                     pruned_ev.run,
                     f"HLT_{trg}",

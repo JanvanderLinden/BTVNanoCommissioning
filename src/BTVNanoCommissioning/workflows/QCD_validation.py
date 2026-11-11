@@ -18,7 +18,7 @@ from BTVNanoCommissioning.utils.correction import (
 )
 from BTVNanoCommissioning.utils.selection import jet_cut, HLT_helper
 
-import correctionlib
+from BTVNanoCommissioning.helpers import correctionlib_compat
 
 
 class NanoProcessor(processor.ProcessorABC):
@@ -242,7 +242,7 @@ class NanoProcessor(processor.ProcessorABC):
                     raise NotImplementedError(
                         f"Prescale weights not available for {trigger} in {self._year}. Please run `scripts/dump_prescale.py -l <path-to-lumi-mask> -H {','.join(triggers.keys())}`."
                     )
-                pseval = correctionlib.CorrectionSet.from_file(psfile)
+                pseval = correctionlib_compat.from_file(psfile)
                 thispsweight = pseval["prescaleWeight"].evaluate(
                     pruned_ev.run,
                     f"HLT_{trigger}",

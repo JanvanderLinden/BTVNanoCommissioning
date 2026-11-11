@@ -21,7 +21,7 @@ from BTVNanoCommissioning.utils.selection import (
     HLT_helper,
 )
 
-import correctionlib
+from BTVNanoCommissioning.helpers import correctionlib_compat
 
 
 class NanoProcessor(processor.ProcessorABC):
@@ -255,7 +255,7 @@ class NanoProcessor(processor.ProcessorABC):
                 run_num = "355374_362760"
             elif self._year == "2023":
                 run_num = "366727_370790"
-            pseval = correctionlib.CorrectionSet.from_file(
+            pseval = correctionlib_compat.from_file(
                 f"src/BTVNanoCommissioning/data/Prescales/ps_weight_{triggers[0]}_run{run_num}.json"
             )
             # if 369869 in pruned_ev.run: continue

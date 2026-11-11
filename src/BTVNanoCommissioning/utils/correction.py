@@ -12,7 +12,7 @@ from types import SimpleNamespace
 import numpy as np
 import awkward as ak
 import uproot
-import correctionlib
+from BTVNanoCommissioning.helpers import correctionlib_compat
 import numba
 
 try:
@@ -63,7 +63,7 @@ def _load_SF_impl(year, campaign, selMod="default", syst=False):
     Example:
     ```python
     ## Initialization, add EGM map from correctionlib
-    correction_map["EGM"] = correctionlib.CorrectionSet.from_file(
+    correction_map["EGM"] = correctionlib_compat.from_file(
         f"/cvmfs/cms-griddata.cern.ch/cat/metadata/EGM/{campaign_map()[campaign]}/latest/{_ele_file}.json.gz"
     )
     ## Initialization, add EGM map from custom file by extractor
@@ -112,21 +112,21 @@ def _load_SF_impl(year, campaign, selMod="default", syst=False):
                 )
                 if conf.get("LUM") and os.path.exists(f"{_lum_dir}/{conf['LUM']}"):
                     # the file named in the campaign config (e.g. 2024 C-I only)
-                    correct_map["LUM"] = correctionlib.CorrectionSet.from_file(
+                    correct_map["LUM"] = correctionlib_compat.from_file(
                         f"{_lum_dir}/{conf['LUM']}"
                     )
                 else:
                     try:
-                        correct_map["LUM"] = correctionlib.CorrectionSet.from_file(
+                        correct_map["LUM"] = correctionlib_compat.from_file(
                             f"/cvmfs/cms-griddata.cern.ch/cat/metadata/LUM/{_lum_cvmfs}/latest/puWeights.json.gz"
                         )
                     except FileNotFoundError:
                         try:
-                            correct_map["LUM"] = correctionlib.CorrectionSet.from_file(
+                            correct_map["LUM"] = correctionlib_compat.from_file(
                                 f"/cvmfs/cms-griddata.cern.ch/cat/metadata/LUM/{_lum_cvmfs}/latest/puWeights_BCDEFGHI.json.gz"
                             )
                         except FileNotFoundError:
-                            correct_map["LUM"] = correctionlib.CorrectionSet.from_file(
+                            correct_map["LUM"] = correctionlib_compat.from_file(
                                 f"/cvmfs/cms-griddata.cern.ch/cat/metadata/LUM/{_lum_cvmfs}/latest/puWeights_2025pp_Golden_Summer24_25ns_69200ub.json.gz"
                             )
             ## Otherwise custom files
@@ -134,7 +134,7 @@ def _load_SF_impl(year, campaign, selMod="default", syst=False):
                 _pu_path = f"BTVNanoCommissioning.data.LUM.{campaign}"
                 with importlib.resources.path(_pu_path, conf["LUM"]) as filename:
                     if str(filename).endswith(".json.gz"):
-                        correct_map["LUM"] = correctionlib.CorrectionSet.from_file(
+                        correct_map["LUM"] = correctionlib_compat.from_file(
                             str(filename)
                         )
                     elif str(filename).endswith(".histo.root"):
@@ -149,14 +149,14 @@ def _load_SF_impl(year, campaign, selMod="default", syst=False):
                 ".json.gz"
             ):
                 filename = conf["BTV"]["btag"]
-                correct_map["btag"] = correctionlib.CorrectionSet.from_file(
+                correct_map["btag"] = correctionlib_compat.from_file(
                     f"{os.getcwd()}/src/BTVNanoCommissioning/data/BTV/{campaign}/{filename}"
                 )
             if "ctag" in conf["BTV"].keys() and conf["BTV"]["ctag"].endswith(
                 ".json.gz"
             ):
                 filename = conf["BTV"]["ctag"]
-                correct_map["ctag"] = correctionlib.CorrectionSet.from_file(
+                correct_map["ctag"] = correctionlib_compat.from_file(
                     f"{os.getcwd()}/src/BTVNanoCommissioning/data/BTV/{campaign}/{filename}"
                 )
             _btv_cvmfs = _cvmfs_dir(campaign, "BTV")
@@ -164,11 +164,11 @@ def _load_SF_impl(year, campaign, selMod="default", syst=False):
                 f"/cvmfs/cms-griddata.cern.ch/cat/metadata/BTV/{_btv_cvmfs}/latest/"
             ):
                 if "btag" not in correct_map.keys():
-                    correct_map["btag"] = correctionlib.CorrectionSet.from_file(
+                    correct_map["btag"] = correctionlib_compat.from_file(
                         f"/cvmfs/cms-griddata.cern.ch/cat/metadata/BTV/{_btv_cvmfs}/latest/btagging.json.gz"
                     )
                 if "ctag" not in correct_map.keys():
-                    correct_map["ctag"] = correctionlib.CorrectionSet.from_file(
+                    correct_map["ctag"] = correctionlib_compat.from_file(
                         f"/cvmfs/cms-griddata.cern.ch/cat/metadata/BTV/{_btv_cvmfs}/latest/ctagging.json.gz"
                     )
             else:
@@ -181,11 +181,11 @@ def _load_SF_impl(year, campaign, selMod="default", syst=False):
                         _btag_path, conf["BTV"][tagger]
                     ) as filename:
                         if "B" in tagger:
-                            correct_map["btag"] = correctionlib.CorrectionSet.from_file(
+                            correct_map["btag"] = correctionlib_compat.from_file(
                                 filename
                             )
                         else:
-                            correct_map["ctag"] = correctionlib.CorrectionSet.from_file(
+                            correct_map["ctag"] = correctionlib_compat.from_file(
                                 filename
                             )
 
@@ -199,10 +199,10 @@ def _load_SF_impl(year, campaign, selMod="default", syst=False):
             _muo_cvmfs = _cvmfs_dir(campaign, "MUO")
             _mu_path = f"/cvmfs/cms-griddata.cern.ch/cat/metadata/MUO/{_muo_cvmfs}/latest/muon_Z.json.gz"
             if os.path.exists(_mu_path):
-                correct_map["MUO"] = correctionlib.CorrectionSet.from_file(_mu_path)
+                correct_map["MUO"] = correctionlib_compat.from_file(_mu_path)
             ## json
             if any(np.char.find(np.array(list(conf["MUO"].keys())), "mu_json") != -1):
-                correct_map["MUO"] = correctionlib.CorrectionSet.from_file(
+                correct_map["MUO"] = correctionlib_compat.from_file(
                     f"src/BTVNanoCommissioning/data/MUO/{_muo_cvmfs}/latest/{conf['MUO']['mu_json']}"
                 )
 
@@ -269,12 +269,12 @@ def _load_SF_impl(year, campaign, selMod="default", syst=False):
                 if not os.path.exists(_ele_path):
                     _ele_path = f"src/BTVNanoCommissioning/data/EGM/{_egm_cvmfs}/latest/{_ele_file}.json.gz"
                 if os.path.exists(_ele_path):
-                    correct_map[_ele_map] = correctionlib.CorrectionSet.from_file(
+                    correct_map[_ele_map] = correctionlib_compat.from_file(
                         _ele_path
                     )
             ## json
             if any(np.char.find(np.array(list(conf["EGM"].keys())), "ele_json") != -1):
-                correct_map["EGM"] = correctionlib.CorrectionSet.from_file(
+                correct_map["EGM"] = correctionlib_compat.from_file(
                     f"src/BTVNanoCommissioning/data/EGM/{_egm_cvmfs}/latest/{conf['EGM']['ele_json']}"
                 )
 
@@ -331,14 +331,14 @@ def _load_SF_impl(year, campaign, selMod="default", syst=False):
             if not os.path.exists(_mu_path):
                 _mu_path = f"src/BTVNanoCommissioning/data/MUO/{_muss_cvmfs}/latest/muon_scalesmearing.json.gz"
             if os.path.exists(_mu_path):
-                correct_map["muonSS"] = correctionlib.CorrectionSet.from_file(_mu_path)
+                correct_map["muonSS"] = correctionlib_compat.from_file(_mu_path)
         elif SF == "electronSS":
             _eless_cvmfs = _cvmfs_dir(campaign, "electronSS")
             _ele_path = f"/cvmfs/cms-griddata.cern.ch/cat/metadata/EGM/{_eless_cvmfs}/latest/electronSS_EtDependent.json.gz"
             if not os.path.exists(_ele_path):
                 _ele_path = f"src/BTVNanoCommissioning/data/EGM/{_eless_cvmfs}/latest/electronSS_EtDependent.json.gz"
             if os.path.exists(_ele_path):
-                correct_map["electronSS"] = correctionlib.CorrectionSet.from_file(
+                correct_map["electronSS"] = correctionlib_compat.from_file(
                     _ele_path
                 )
             correct_map["electronSS_cfg"] = conf["electronSS"]
@@ -376,7 +376,7 @@ def _load_SF_impl(year, campaign, selMod="default", syst=False):
                 warnings.warn(f"BTV_JEC_ERA test hook: JME {conf['JME']}")
             if "JME_path" in conf and os.path.exists(conf["JME_path"]):
                 # Custom JME path (e.g. preliminary Puppi JEC for Run 2 NanoAODv15)
-                correct_map["JME"] = correctionlib.CorrectionSet.from_file(
+                correct_map["JME"] = correctionlib_compat.from_file(
                     conf["JME_path"]
                 )
                 correct_map["JME_cfg"] = conf["JME"]
@@ -422,11 +422,11 @@ def _load_SF_impl(year, campaign, selMod="default", syst=False):
                         for c in _mc_json.get("compound_corrections", [])
                         if c["name"] not in existing_comp
                     )
-                    correct_map["JME"] = correctionlib.CorrectionSet.from_string(
+                    correct_map["JME"] = correctionlib_compat.from_string(
                         json.dumps(_data_json)
                     )
                 else:
-                    correct_map["JME"] = correctionlib.CorrectionSet.from_file(
+                    correct_map["JME"] = correctionlib_compat.from_file(
                         _jme_path
                     )
                 correct_map["JME_cfg"] = conf["JME"]
@@ -450,7 +450,7 @@ def _load_SF_impl(year, campaign, selMod="default", syst=False):
                 f"/cvmfs/cms-griddata.cern.ch/cat/metadata/JME/{_cvmfs_dir(campaign, 'JMAR')}/latest/jmar.json.gz"
             ):
                 correct_map["JMAR_cfg"] = {j: f for j, f in conf["JMAR"].items()}
-                correct_map["JMAR"] = correctionlib.CorrectionSet.from_file(
+                correct_map["JMAR"] = correctionlib_compat.from_file(
                     f"/cvmfs/cms-griddata.cern.ch/cat/metadata/JME/{_cvmfs_dir(campaign, 'JMAR')}/latest/jmar.json.gz"
                 )
         elif SF == "jetveto":
@@ -464,7 +464,7 @@ def _load_SF_impl(year, campaign, selMod="default", syst=False):
             if not isRootFile and os.path.exists(
                 f"/cvmfs/cms-griddata.cern.ch/cat/metadata/JME/{_cvmfs_dir(campaign, 'jetveto')}/latest/jetvetomaps.json.gz"
             ):
-                correct_map["jetveto"] = correctionlib.CorrectionSet.from_file(
+                correct_map["jetveto"] = correctionlib_compat.from_file(
                     f"/cvmfs/cms-griddata.cern.ch/cat/metadata/JME/{_cvmfs_dir(campaign, 'jetveto')}/latest/jetvetomaps.json.gz"
                 )
             else:
@@ -701,7 +701,7 @@ _jersmear_path = (
     "/cvmfs/cms-griddata.cern.ch/cat/metadata/JME/JER-Smearing/latest/jer_smear.json.gz"
 )
 if os.path.exists(_jersmear_path):
-    cset_jersmear = correctionlib.CorrectionSet.from_file(_jersmear_path)
+    cset_jersmear = correctionlib_compat.from_file(_jersmear_path)
 else:
     warnings.warn(
         "JER smearing JSON not found in CVMFS. JER smearing corrections will be disabled.",
@@ -4899,7 +4899,7 @@ def vjets_stitch(pruned_ev, weights):
             / os.path.basename(path)
         )
     if path not in _STITCH:
-        corr = correctionlib.CorrectionSet.from_file(path)["vjets_fxfx_stitch"]
+        corr = correctionlib_compat.from_file(path)["vjets_fxfx_stitch"]
         with open(path) as f:
             keys = {c["key"] for c in json.load(f)["corrections"][0]["data"]["content"]}
         _STITCH[path] = (corr, keys)

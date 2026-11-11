@@ -24,7 +24,7 @@ dependencies:
   - llvmlite==0.48.0
   - pip:
     - coffea==2026.7.0
-    - correctionlib==2.7.0
+    - correctionlib==2.9.0
     - onnxruntime
     - awkward>=2.8.11
     - uproot>=5.7.0

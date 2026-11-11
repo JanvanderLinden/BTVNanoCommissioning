@@ -1,6 +1,6 @@
 import awkward as ak
 import numpy as np
-import correctionlib
+from BTVNanoCommissioning.helpers import correctionlib_compat
 import os
 from coffea import processor
 from coffea.analysis_tools import Weights
@@ -337,7 +337,7 @@ class NanoProcessor(processor.ProcessorABC):
                     raise NotImplementedError(
                         f"Prescale weights not available for {trigger} in {self._year}. Please run `scripts/dump_prescale.py`."
                     )
-                pseval = correctionlib.CorrectionSet.from_file(psfile)
+                pseval = correctionlib_compat.from_file(psfile)
                 thispsweight = pseval["prescaleWeight"].evaluate(
                     pruned_ev.run,
                     f"HLT_{trigger}",

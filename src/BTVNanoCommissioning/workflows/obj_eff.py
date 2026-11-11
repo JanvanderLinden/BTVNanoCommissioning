@@ -5,7 +5,7 @@ import os
 import types
 
 import awkward as ak
-import correctionlib
+from BTVNanoCommissioning.helpers import correctionlib_compat
 import hist
 import numpy as np
 from coffea import processor
@@ -451,7 +451,7 @@ class NanoProcessor(processor.ProcessorABC):
         # test hook BTV_PU_FILE=<json, may contain {year}>: other pileup weights (e.g. 75.3 mb)
         self.egm = (
             {
-                f: correctionlib.CorrectionSet.from_file(f)
+                f: correctionlib_compat.from_file(f)
                 for specs in ELE_SF[year].values()
                 for f, *_ in specs
             }
@@ -465,7 +465,7 @@ class NanoProcessor(processor.ProcessorABC):
         }
         # own attribute: SF_map is rebuilt from the config when pickled to workers
         self.pu_alt = (
-            {"LUM": correctionlib.CorrectionSet.from_file(os.environ["BTV_PU_FILE"].format(year=year))}
+            {"LUM": correctionlib_compat.from_file(os.environ["BTV_PU_FILE"].format(year=year))}
             if os.environ.get("BTV_PU_FILE")
             else None
         )
