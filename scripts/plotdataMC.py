@@ -291,6 +291,8 @@ def main(args):
         ]
 
     for index, discr in enumerate(var_set):
+        # text box of this plot: phase-space label (+ jet pT bin of pT-binned discriminants)
+        var_txt = input_txt
         # Skip non-histogram objects
         try:
             if not isinstance(collated["mc"][discr], hist.hist.Hist):
@@ -772,7 +774,10 @@ def main(args):
                 and (SV_bininfo[discr]["inputVar_units"] == "")
                 else SV_bininfo[discr]["displayname"]
             )
-        elif discr.startswith(("stagdisc_", "stagscore_")):
+        elif discr.startswith(("stagdisc_", "stagscore_")) or (
+            collated["mc"][discr].axes[-1].name == "discr"
+        ):
+            # tagger outputs: the axis label is the branch name
             xlabel = collated["mc"][discr].axes[-1].label
         else:
             xlabel = axes_name(discr)
@@ -828,9 +833,9 @@ def main(args):
         xax.set_xlim(xmin, xmax)
 
         if "2Dbin_pt" in discr or "HFvLF_pt" in discr or "BvC_pt" in discr:
-            input_txt += "\n" + low_edge + " < jet $p_T$ < " + up_edge + " GeV"
+            var_txt += "\n" + low_edge + " < jet $p_T$ < " + up_edge + " GeV"
 
-        at = AnchoredText(input_txt + "\n" + args.ext, loc=2, frameon=False)
+        at = AnchoredText(var_txt + "\n" + args.ext, loc=2, frameon=False)
         ax.add_artist(at)
 
         scale = ""

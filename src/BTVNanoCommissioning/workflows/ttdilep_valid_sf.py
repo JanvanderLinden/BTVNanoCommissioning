@@ -30,6 +30,8 @@ from BTVNanoCommissioning.helpers.stag_helpers import (
     TaggingBin,
     get_stag_config,
     add_stag_fields,
+    stag_array_schema,
+    tagger_jet_fields,
 )
 from BTVNanoCommissioning.utils.selection import (
     HLT_helper,
@@ -75,8 +77,11 @@ class NanoProcessor(processor.ProcessorABC):
         # (helpers/stag_helpers.py) instead of the 2D tag categories
         self.stag = stag
         if stag:
-            self.tagging = TaggingBin(get_stag_config(campaign)["tagging_wps"])
+            stag_cfg = get_stag_config(campaign)
+            self.tagging = TaggingBin(stag_cfg["tagging_wps"])
             self.tagging.check()
+            # only the outputs of this tagger are histogrammed and written to the arrays
+            self.tagger = stag_cfg["tagger"]
 
     @property
     def accumulator(self):
@@ -111,13 +116,18 @@ class NanoProcessor(processor.ProcessorABC):
         output = {}
         if not self.noHist:
             output = histogrammer(
-                [f for f in events.Jet.fields if not (self.stag and "2Dbin" in f)],
+                (
+                    tagger_jet_fields(events.Jet.fields, self.tagger)
+                    if self.stag
+                    else events.Jet.fields
+                ),
                 obj_list=objs,
                 hist_collections=hist_collections,
                 njet=2,
                 # SelJet.svmass is valid since the jetindx fix (111b17f);
                 # see histograms/sf2d.py.
                 sf2d_svmass=True,
+                stag_flavour=self.stag,
             )
 
         if shift_name is None:
@@ -369,7 +379,11 @@ class NanoProcessor(processor.ProcessorABC):
                 systematics,
                 dataset,
                 isRealData,
-                schema="SLIM_STAG" if self.stag else "SLIM",
+                schema=(
+                    stag_array_schema(self.tagger, self.tagging.branches)
+                    if self.stag
+                    else "SLIM"
+                ),
                 perJet=(self.selMod == "ttdilep_sf_2D"),
             )
         return {dataset: output}

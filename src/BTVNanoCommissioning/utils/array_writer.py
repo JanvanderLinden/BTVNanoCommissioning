@@ -400,7 +400,9 @@ def array_writer(
         if not isRealData:
             out_branch = np.append(out_branch, othersMC)
     elif schema is not None:
-        netout = arraySchema[schema] + [b for b in pruned_event.fields if "weight" in b]
+        # schema: name in arraySchema, or the list of branches itself
+        branches = list(schema) if isinstance(schema, (list, tuple)) else arraySchema[schema]
+        netout = branches + [b for b in pruned_event.fields if "weight" in b]
         out_branch = np.array(netout)
         # uproot_writeable (helpers/func.py) matches sub-field names by substring,
         # so an untrimmed SelJet record leaks related NanoAOD fields even for an

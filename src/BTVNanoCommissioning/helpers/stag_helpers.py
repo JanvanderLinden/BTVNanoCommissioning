@@ -21,6 +21,7 @@ Contents
 from __future__ import annotations
 
 import os
+import re
 
 import numpy as np
 import awkward as ak
@@ -40,6 +41,9 @@ _RUN3_2024 = {
     # correction_config entries (AK4_parameters) with the lepton SFs of the
     # prompt-MVA lepton selection, per channel
     "lepton_sf_selmod": {"mu": "semittM_2D", "e": "semittE_2D"},
+    # tagger of the WPs: only its outputs (Jet btag<tagger>*) are histogrammed and written
+    # to the arrays of the stag_* workflows (tagger_jet_fields, stag_array_schema)
+    "tagger": "UParTAK4",
     # sfs-3d WP json (wps.json of B_derive_wps.sh)
     "tagging_wps": f"{_DATA_DIR}/Summer24/stag/stag-wp.json",
     # SPANet ONNX model(s): one file, or the k-fold models in fold order (model k
@@ -61,6 +65,7 @@ _RUN3_2024 = {
 # private NanoAODv15 tuples (CustomSummer24 MC, CustomSummer25 data): NoPIDParTAK4 WPs
 _RUN3_2024_NOPID = dict(
     _RUN3_2024,
+    tagger="NoPIDParTAK4",
     # B_derive_wps.sh with wp/configs/stag_2024_UParTNoPID.yml: pt-inclusive WPs, svudg
     # reweighted (ud/g)
     tagging_wps=f"{_DATA_DIR}/CustomSummer24/stag/wp_v1_ptincl_rew_svudg.json",
@@ -75,6 +80,60 @@ STAG_CONFIG = {
 }
 
 
+# Name stems of the taggers (and their input features) in the NanoAOD Jet collection; a
+# field with one of these stems (optionally after "btag") belongs to that tagger
+TAGGER_STEMS = (
+    "UParTAK4NoAdv",
+    "UParTAK4",
+    "NoPIDParTAK4",
+    "RobustParTAK4",
+    "ParTAK4",
+    "PNet",
+    "DeepFlav",
+    "DeepJet",
+    "DeepCSV",
+)
+# 2D-method variants of a tagger's discriminants: pT-binned (_pt25to35), 2D categories
+# (2Dbin), transformed HFvLF/BvC ("...t")
+_TAGGER_2D_VARIANT = re.compile(r"(_pt\d+to(\d+|inf)$|2Dbin|(HFvLF|BvC)t$)")
+
+
+def field_tagger(field: str):
+    """Tagger stem of a Jet field (TAGGER_STEMS), None for non-tagger fields."""
+    name = field[len("btag") :] if field.startswith("btag") else field
+    for stem in TAGGER_STEMS:  # longest stems first (UParTAK4NoAdv before UParTAK4)
+        if name.startswith(stem):
+            return stem
+    return "other" if field.startswith("btag") else None
+
+
+def tagger_jet_fields(fields, tagger: str) -> list:
+    """Jet fields for the stag_* workflows: all non-tagger fields plus the outputs of
+    `tagger` (STAG_CONFIG "tagger"), without their 2D-method variants (pT-binned, 2Dbin,
+    transformed)."""
+    out = []
+    for f in fields:
+        owner = field_tagger(f)
+        if owner is None or (owner == tagger and not _TAGGER_2D_VARIANT.search(f)):
+            out.append(f)
+    return out
+
+
+def stag_array_schema(tagger: str, extra_jet_fields=()) -> list:
+    """Array schema SLIM_STAG restricted to the tagger outputs of `tagger`, plus the
+    given Jet fields (e.g. TaggingBin.branches, the WP json inputs) of SelJet."""
+    from BTVNanoCommissioning.utils.array_writer import arraySchema
+
+    schema = [
+        b
+        for b in arraySchema["SLIM_STAG"]
+        if not b.startswith("SelJet_")
+        or field_tagger(b[len("SelJet_") :]) in (None, tagger)
+    ]
+    schema += [f"SelJet_{f}" for f in extra_jet_fields if f"SelJet_{f}" not in schema]
+    return schema
+
+
 def get_stag_config(campaign: str) -> dict:
     if campaign not in STAG_CONFIG:
         raise KeyError(
@@ -87,6 +146,7 @@ def get_stag_config(campaign: str) -> dict:
         if env in os.environ:
             cfg[key] = float(os.environ[env])
     cfg["tagging_wps"] = os.environ.get("STAG_TAGGING_WPS", cfg.get("tagging_wps"))
+    cfg["tagger"] = os.environ.get("STAG_TAGGER", cfg.get("tagger"))
     cfg["spanet_model"] = os.environ.get("STAG_SPANET_MODEL", cfg.get("spanet_model"))
     if isinstance(cfg["spanet_model"], str) and "," in cfg["spanet_model"]:
         cfg["spanet_model"] = [f for f in cfg["spanet_model"].split(",") if f]

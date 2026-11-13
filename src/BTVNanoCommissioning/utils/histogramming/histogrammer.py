@@ -5,6 +5,8 @@ import numpy as np
 from BTVNanoCommissioning.helpers.func import flatten
 from .hist_helpers import get_hist_collections, get_axes_collections
 from .histograms.sf2d import SCHEMES as SF2D_SCHEMES
+from .histograms.stag import stag_flavour_axis
+from BTVNanoCommissioning.helpers.stag_helpers import STAG_FLAVOURS
 from .histograms.sf2d import TAG_LADDER_THRESHOLDS, TAG_SEL_CODES
 
 
@@ -154,6 +156,25 @@ def _fill_sf2d_histograms(output, seljets, genflavor, weight, syst):
 STAG_PREFIXES = ("stagtpl_", "stagscore_", "stagdisc_")
 
 
+def uses_stag_flavours(output):
+    """True if the non-STAG histograms of `output` have the s-tagging flavour axis."""
+    for name, h in output.items():
+        h = h.hist if isinstance(h, _FillRecorder) else h
+        if name.startswith(STAG_PREFIXES) or not hasattr(h, "axes"):
+            continue
+        if "flav" in h.axes.name:
+            return len(h.axes["flav"]) == len(STAG_FLAVOURS)
+    return False
+
+
+def stag_flavour(jets):
+    """s-tagging flavour (selection.stagflav) per jet, int; stagFlav if already set."""
+    from BTVNanoCommissioning.utils.selection import stagflav
+
+    flav = jets.stagFlav if "stagFlav" in jets.fields else stagflav(jets)
+    return ak.values_astype(flav, int)
+
+
 def _fill_stag_histograms(output, jets, weight, syst, osss=None):
     """Fill the s-tagging histograms (histograms/stag.py) present in `output` for a
     jet collection that carries the stag fields (helpers/stag_helpers.add_stag_fields),
@@ -220,6 +241,7 @@ def histogrammer(
     hist_collections=["fourvector"],
     axes_collections=["common"],
     custom_axes=None,
+    stag_flavour=False,
     **kwargs,
 ):
     """
@@ -231,6 +253,8 @@ def histogrammer(
     hist_collections (list): List of histogram collections to be included in the histograms. Defined in the utils/histogramming/histograms directory.
     axes_collections (list): List of axes collections to be included in the histograms. Defined in the utils/histogramming/axes directory.
     custom_axes (dict): Dictionary of custom axes to be included in the histograms. Overwrites the axes defined in the axes_collections.
+    stag_flavour (bool): flavour axis of all histograms in the s-tagging flavours (stag_*
+        workflows: b, bb, c, cc, s, ud, g, PU, selection.stagflav) instead of the default one.
     **kwargs: Additional keyword arguments to be passed to the histogram collection functions.
 
     Example:
@@ -252,6 +276,8 @@ def histogrammer(
         axes = custom_axes
     else:
         axes = get_axes_collections(axes_collections)
+    if stag_flavour:
+        axes = dict(axes, flav=stag_flavour_axis())
 
     ## Histograms
     _hist_dict = get_hist_collections(
@@ -337,6 +363,12 @@ def histo_writter(pruned_ev, output, weights, systematics, isSyst, SF_map):
         genflavor = ak.zeros_like(pruned_ev.SelJet.pt, dtype=int)
         if "MuonJet" in pruned_ev.fields:
             smflav = ak.zeros_like(pruned_ev.MuonJet.pt, dtype=int)
+    # histograms with the s-tagging flavour axis (histogrammer(stag_flavour=True)):
+    # fill the s-tagging flavours
+    if not isRealData and uses_stag_flavours(output):
+        genflavor = stag_flavour(pruned_ev.SelJet)
+        if "MuonJet" in pruned_ev.fields:
+            smflav = stag_flavour(pruned_ev.MuonJet)
 
     # Fill code for one systematic variation
     def _fill_all(output, weight, syst_perjet):
