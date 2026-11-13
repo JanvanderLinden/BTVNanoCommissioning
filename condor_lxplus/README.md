@@ -5,7 +5,7 @@ The jobs submitted by this script rely on eos/afs being mounted on the condor no
 
 - It does not create a new installation of conda/mamba and instead uses a preinstalled conda env (you can replace this with your own conda/mamba path in the PATH variable, if needed).
 - It does not create a tarball of the BTVNanoComm code either, simply `cd`s to the working directory in eos/afs.
-- Copies the proxy locally and reads it directly from the condor node.
+- Ships a copy of the proxy with each job (`x509userproxy`).
 
 ## Example
 ```
@@ -41,3 +41,15 @@ python condor_lxplus/haddFinal.py <output_dir> --mc <hadd_normalized_dir> [<hadd
 ## Cons
 - Relies on eos/afs mount, hence jobs will fail to run on condor nodes where the mount is unstable or when afs is overloaded. **You may need to keep releasing jobs in that case.**
 - Will not work where eos is not mounted, e.g. on CMSConnect nodes.
+
+## Outputs, proxy and logs
+
+- Each job runs `runner.py` with `--outputdir` in its local working directory and copies the
+  outputs once to `--outputDir` at the end (`execute.sh`): `xrdcp` for `/eos/...` paths and
+  `root://` URLs (3 attempts per file), `cp` otherwise. `submitter.py` makes a relative
+  `--outputDir` absolute.
+- The proxy is copied to `<job dir>/proxy` and shipped with each job (`x509userproxy`). It must
+  stay valid until the last job has finished.
+- `--jobDir` (or `$BTV_CONDOR_JOBDIR`) sets where `jobs_<jobName>` is created. Outside `/eos`
+  (e.g. on AFS) the jobs are submitted without `-spool`. The condor user log goes to
+  `jobs_<jobName>/log/`, stdout and stderr to `jobs_<jobName>/out/` and `jobs_<jobName>/err/`.

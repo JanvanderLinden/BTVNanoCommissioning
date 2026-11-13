@@ -211,6 +211,9 @@ if __name__ == "__main__":
     # Create job dir
     os.makedirs(args.jobDir, exist_ok=True)
     job_dir = os.path.abspath(os.path.join(args.jobDir, f"jobs_{args.jobName}"))
+    # the jobs copy their outputs to --outputDir at the end: absolute path or root:// URL
+    if "://" not in args.outputDir:
+        args.outputDir = os.path.abspath(args.outputDir)
     if os.path.exists(job_dir):
         user_input = input("Job directory already exists, overwrite? (y/n): ")
         if user_input.lower() == "y":
@@ -220,16 +223,20 @@ if __name__ == "__main__":
     print(f"Job directory created: {job_dir}")
     os.mkdir(job_dir)
     os.mkdir(job_dir + "/log")
+    os.mkdir(job_dir + "/out")
+    os.mkdir(job_dir + "/err")
 
     # Handle voms proxy
     if args.voms is not None:
         if not os.path.exists(args.voms):
             raise Exception(f"Provided voms proxy path {args.voms} does not exist.")
-        shutil.copy(args.voms, os.path.join(base_dir, "proxy"))
+        proxy_path = os.path.join(job_dir, "proxy")
+        shutil.copy(args.voms, proxy_path)
         print(f"Copied provided proxy file {args.voms} to local directory.")
     else:
         proxy_file = get_proxy_path()
-        os.system(f"scp {proxy_file} {os.path.join(base_dir, 'proxy')}")
+        proxy_path = os.path.join(job_dir, "proxy")
+        shutil.copy(proxy_file.strip(), proxy_path)
         print(f"Copied proxy file {proxy_file} to local directory.")
 
     # Find conda/mamba environment
@@ -332,13 +339,14 @@ request_cpus = {nthreads}
 +JobFlavour = "workday"
 
 Log        = {log_dir}/job.log_$(Cluster)
-Output     = {log_dir}/job.out_$(Cluster)-$(Process)
-Error      = {log_dir}/job.err_$(Cluster)-$(Process)
+Output     = {job_dir}/out/job.out_$(Cluster)-$(Process)
+Error      = {job_dir}/err/job.err_$(Cluster)-$(Process)
 
 should_transfer_files   = YES
 when_to_transfer_output = ON_EXIT_OR_EVICT
 transfer_input_files    = {transfer_input_files}
 {transfer_output}
+x509userproxy           = {proxy}
 on_exit_remove   = (ExitBySignal == False) && (ExitCode == 0)
 max_retries      = 3
 requirements     = (Machine =!= split(LastRemoteHost, "@")[1])
@@ -354,6 +362,8 @@ Queue JOBNUM from {jobnum_file}
         transfer_input_files=f"{job_dir}/arguments.json,{job_dir}/split_samples.json,{job_dir}/jobnum_list.txt",
         jobnum_file=f"{job_dir}/jobnum_list.txt",
         transfer_output=transfer_output,
+        job_dir=job_dir,
+        proxy=proxy_path,
     )
     with open(os.path.join(job_dir, "submit.jdl"), "w") as f:
         f.write(jdl_template)

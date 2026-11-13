@@ -15,7 +15,8 @@ env
 WORKDIR=`pwd`
 
 cd $COMMDIR
-export X509_USER_PROXY=$COMMDIR/proxy
+# proxy shipped with the job (x509userproxy in submit.jdl; condor sets X509_USER_PROXY)
+export X509_USER_PROXY=${X509_USER_PROXY:-$COMMDIR/proxy}
 voms-proxy-info
 
 export PATH="$ENVPATH:$PATH" 
@@ -67,12 +68,50 @@ else
     OPTS="$OPTS --executor iterative"
 fi
 
-OPTS="$OPTS --overwrite --outputdir $OUTPUTDIR"
+# outputs are written to the job's local directory and copied to OUTPUTDIR at the end
+LOCALOUT=$WORKDIR/output
+mkdir -p $LOCALOUT
+OPTS="$OPTS --overwrite --outputdir $LOCALOUT"
 
 # Launch
 echo "Now launching: python runner.py $OPTS"
 python runner.py $OPTS
 
-RET=$?
+# Stage-out: one copy per output file to OUTPUTDIR, xrdcp (3 attempts) for /eos paths and
+# root:// URLs, cp otherwise
+xrd_url() {
+    local p="$1"
+    case "$p" in
+        root://*) echo "$p"; return ;;
+        /eos/home-*) p="/eos/user/${p:10:1}/${p:12}" ;;
+    esac
+    case "$p" in
+        /eos/user/*) echo "root://eosuser.cern.ch/$p" ;;
+        /eos/cms/*) echo "root://eoscms.cern.ch/$p" ;;
+        /eos/project/*) echo "root://eosproject.cern.ch/$p" ;;
+    esac
+}
+DESTURL=$(xrd_url "$OUTPUTDIR")
+NFILES=0
+cd $LOCALOUT
+while IFS= read -r -d '' f; do
+    rel=${f#./}
+    if [ -n "$DESTURL" ]; then
+        ok=0
+        for i in 1 2 3; do
+            if xrdcp -f -p -N "$f" "$DESTURL/$rel"; then ok=1; break; fi
+            sleep $((30 * i))
+        done
+        if [ $ok -ne 1 ]; then
+            echo "ERROR: stage-out of $rel to $DESTURL failed" >&2
+            exit 1
+        fi
+    else
+        mkdir -p "$OUTPUTDIR/$(dirname "$rel")"
+        cp -f "$f" "$OUTPUTDIR/$rel"
+    fi
+    NFILES=$((NFILES + 1))
+done < <(find . -type f -print0)
+echo "Staged out $NFILES file(s) to ${DESTURL:-$OUTPUTDIR}"
 
-exit $RET
+exit 0
