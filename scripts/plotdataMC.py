@@ -194,7 +194,9 @@ def main(args):
                             continue
                         output[sample][key] += fdict[sample][key]
 
-    output = scaleSumW(output, args.lumi)
+    # variables=(): no per-variation renormalised copies (<hist>_<variation>) for outputs
+    # without sumw_<variation>; the plots use the syst axis
+    output = scaleSumW(output, args.lumi, variables=())
 
     mergemap = {}
     ## create merge map from sample set/data MC
@@ -385,6 +387,9 @@ def main(args):
 
         # check if plottable, skip otherwise
         hmc = collated["mc"][discr][allaxis]
+        if not isinstance(hmc, hist.Hist) or len(hmc.axes) == 0:
+            print(f"Skipping {discr}: no axis left to plot after the selections")
+            continue
         if len(hmc.axes) > 2:
             print(f"Skipping {discr}: after selections still has {len(hmc.axes)} axes")
             continue
