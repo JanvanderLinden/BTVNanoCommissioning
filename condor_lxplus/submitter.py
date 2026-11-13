@@ -56,6 +56,12 @@ def get_condor_submitter_parser(parser):
         "there directly.",
     )
     parser.add_argument(
+        "--accountingGroup",
+        default=os.environ.get("BTV_CONDOR_ACCOUNTING_GROUP"),
+        help="HTCondor accounting group (+AccountingGroup), e.g. group_u_CMST3.all "
+        "(default: $BTV_CONDOR_ACCOUNTING_GROUP, else none)",
+    )
+    parser.add_argument(
         "--noSpool", action="store_true", help="Submit condor jobs without spooling."
     )
     parser.add_argument(
@@ -337,6 +343,7 @@ Arguments = $(JOBNUM) {base_dir} {outputDir} {envpath} {nthreads}
 request_cpus = {nthreads}
 
 +JobFlavour = "workday"
+{accounting}
 
 Log        = {log_dir}/job.log_$(Cluster)
 Output     = {job_dir}/out/job.out_$(Cluster)-$(Process)
@@ -358,6 +365,7 @@ Queue JOBNUM from {jobnum_file}
         outputDir=args.outputDir,
         envpath=envpath,
         nthreads=args.nCPU,
+        accounting=f'+AccountingGroup = "{args.accountingGroup}"' if args.accountingGroup else "",
         log_dir=f"{job_dir}/log",
         transfer_input_files=f"{job_dir}/arguments.json,{job_dir}/split_samples.json,{job_dir}/jobnum_list.txt",
         jobnum_file=f"{job_dir}/jobnum_list.txt",
