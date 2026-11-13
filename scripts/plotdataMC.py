@@ -734,7 +734,7 @@ def main(args):
         ax.set_ylabel("Events")
         if rax is not None:
             rax.set_ylabel("Data/MC")
-        ax.ticklabel_format(style="sci", scilimits=(-3, 3))
+        ax.ticklabel_format(axis="y", style="sci", scilimits=(-3, 3))
         ax.get_yaxis().get_offset_text().set_position((-0.065, 1.05))
 
         # FIXME: add wildcard option for xlabel
