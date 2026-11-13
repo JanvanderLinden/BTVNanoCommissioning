@@ -54,6 +54,38 @@ Create the environment from `test_env.yml` (coffea is installed with it) and act
 mamba env create -f test_env.yml   # environment btv_coffea: python 3.10, coffea 2026.7.0, awkward 2
 conda activate btv_coffea
 ```
+On lxplus, put the Miniforge installation and the environment on AFS work
+(`/afs/cern.ch/work/<u>/<user>`, `mamba env create -f test_env.yml -p <path>/envs/btv_coffea`),
+not on EOS: tens of thousands of small files make imports slow and unreliable there. Keep the
+conda package caches out of the AFS home (10 GB quota), e.g. `conda config --add pkgs_dirs
+/afs/cern.ch/work/<u>/<user>/conda_pkgs` and `export PIP_CACHE_DIR=/afs/cern.ch/work/<u>/<user>/pip_cache`.
+
+One-time fixes for the grid proxy on lxplus:
+```bash
+conda activate btv_coffea
+# the conda voms package uses an outdated VOMS server list (voms-proxy-init hangs):
+# remove only this package, without re-solving the environment
+conda remove --force voms
+hash -r; which voms-proxy-init        # -> /usr/bin/voms-proxy-init
+
+# ca-policy-lcg sets X509_CERT_DIR to bundled CRLs that expire after about a week
+# ("CRL has expired"): point it to the CVMFS copy, after the package's own activation script
+mkdir -p $CONDA_PREFIX/etc/conda/activate.d
+cat > $CONDA_PREFIX/etc/conda/activate.d/zz_x509_cert_dir.sh <<'EOF'
+if [ -d /cvmfs/grid.cern.ch/etc/grid-security/certificates ]; then
+    export X509_CERT_DIR=/cvmfs/grid.cern.ch/etc/grid-security/certificates
+fi
+EOF
+
+# keep later installs into this environment on conda-forge only
+conda config --env --add channels conda-forge
+conda config --env --set channel_priority strict
+conda deactivate && conda activate btv_coffea
+```
+Use `conda remove --force voms`: a plain `conda remove voms` re-solves the whole environment
+and can replace the conda-forge packages with builds from other channels. `setup_env.sh`
+(below) applies both fixes for its shell as well.
+
 ### Setup the framework
 
 ```bash
@@ -68,14 +100,31 @@ pip install -e .
 pip install -e .[dev,docs] # for developer
 ```
 
+In every new shell on lxplus:
+```bash
+source setup_env.sh                   # BTV_ENV=<name or prefix> if the environment is not btv_coffea
+voms-proxy-init --rfc --voms cms -valid 192:00
+```
+`setup_env.sh` activates the environment and sets
+- `X509_CERT_DIR` to the CVMFS certificates, and the system `voms-proxy-*` if the conda `voms`
+  package is still installed;
+- `X509_USER_PROXY=$HOME/x509up_u<uid>` (unless set);
+- `/cvmfs/cms.cern.ch/common` on the `PATH` (`dasgoclient`) and `GFAL_PYTHONBIN`;
+- the defaults of `condor_lxplus/submitter.py`: `BTV_CONDOR_JOBDIR`
+  (`/afs/cern.ch/work/<u>/<user>/btv_jobs`) and `BTV_CONDOR_ACCOUNTING_GROUP`
+  (`group_u_CMST3.all`).
+
+It warns if `BTVNanoCommissioning` is not installed from this clone (e.g. after moving it:
+rerun `pip install -e .`) or if the clone or the environment is on EOS. `CONDA_BASE` sets the
+conda installation if it is not found automatically.
+
 The central environment `/eos/home-m/milee/miniforge3/envs/btv_coffea` contains coffea 0.7
 and does not run the current version (coffea 2026 / awkward 2); create your own from
 `test_env.yml`.
 
 You can still install additional packages itself by `pip install $PACKAGE`
 
-Make sure that 'dasgoclient' command is found by ensuring it is in your `$PATH` variable.
-Please, run `source env_setup_complete.sh` after having activated the environment to make sure that the `$PATH` variable is correctly configured.
-
-`conda activate btv_coffea` is required to setup
+Make sure that 'dasgoclient' command is found by ensuring it is in your `$PATH` variable
+(`setup_env.sh` does this; without it, run `source env_setup_complete.sh` after activating the
+environment).
 

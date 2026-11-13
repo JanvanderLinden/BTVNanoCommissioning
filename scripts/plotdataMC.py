@@ -1,4 +1,7 @@
 import numpy as np
+
+np.finfo(np.dtype("float32"))
+np.finfo(np.dtype("float64"))
 import fnmatch
 import argparse, os, glob, sys
 import matplotlib.pyplot as plt
@@ -8,8 +11,8 @@ from coffea.util import load
 from matplotlib.offsetbox import AnchoredText
 
 plt.style.use(hep.style.CMS)
-FONT_SIZE = 25
-plt.rcParams.update({"font.size": FONT_SIZE})
+fs = 25
+plt.rcParams.update({"font.size": fs})
 
 from BTVNanoCommissioning.workflows import workflows
 from BTVNanoCommissioning.helpers.xs_scaler import collate, scaleSumW
@@ -120,6 +123,12 @@ def get_parser():
         help="s-tagging flavours (stag_* workflows): show bb and cc separately from b and c",
     )
     parser.add_argument(
+        "--mc-only",
+        action="store_true",
+        help="MC only: the MC stack with its stat. uncertainty, without data and ratio panel "
+        "(used automatically when the inputs contain no data)",
+    )
+    parser.add_argument(
         "--autorebin",
         default=None,
         help="Rebin the plotting variables, input `int` or `list`. int: merge N bins. list of number: rebin edges(non-uniform bin is possible)",
@@ -207,6 +216,12 @@ def main(args):
         mergemap["mc"] = mclist
         mergemap["data"] = datalist
 
+    mc_only = args.mc_only or not mergemap["data"]
+    if mc_only:
+        if not args.mc_only:
+            print("No data in the inputs: MC-only plots")
+        mergemap.pop("data", None)
+
     collated = collate(output, mergemap)
     collated = {
         key: value for key, value in collated.items() if isinstance(collated[key], dict)
@@ -284,12 +299,15 @@ def main(args):
 
         # Skip missing and empty hists
         check_flow = args.flow in ("show", "sum")
-        if discr not in collated["mc"].keys() or discr not in collated["data"].keys():
+        if discr not in collated["mc"].keys() or (
+            not mc_only and discr not in collated["data"].keys()
+        ):
             print(discr, "not in files, skipping")
             continue
         elif (collated["mc"][discr].values(flow=check_flow) == 0).all() or (
-            collated["data"][discr].values(flow=check_flow) == 0
-        ).all():
+            not mc_only
+            and (collated["data"][discr].values(flow=check_flow) == 0).all()
+        ):
             print(discr, "is empty, skipping")
             continue
 
@@ -410,13 +428,22 @@ def main(args):
             )
             print("============")
 
-        fig, ((ax), (rax)) = plt.subplots(
-            2, 1, figsize=(10, 10), gridspec_kw={"height_ratios": (3, 1)}, sharex=True
-        )
-        fig.subplots_adjust(hspace=0.06, top=0.92, bottom=0.1, right=0.97)
+        if mc_only:
+            fig, ax = plt.subplots(figsize=(10, 10))
+            rax = None
+            fig.subplots_adjust(top=0.92, bottom=0.1, right=0.97)
+        else:
+            fig, ((ax), (rax)) = plt.subplots(
+                2,
+                1,
+                figsize=(10, 10),
+                gridspec_kw={"height_ratios": (3, 1)},
+                sharex=True,
+            )
+            fig.subplots_adjust(hspace=0.06, top=0.92, bottom=0.1, right=0.97)
         hep.cms.label(
             args.CMS_label,
-            data=True,
+            data=not mc_only,
             lumi=args.lumi / 1000.0,
             com=args.com,
             loc=0,
@@ -470,24 +497,25 @@ def main(args):
             hep.histplot(
                 collated["mc"][discr][noSF_axis],
                 label=["w/o SF"],
-                color="tab:gray",
+                color="#9494AE",
                 width=2,
                 yerr=True,
                 ax=ax,
                 flow=args.flow,
                 sort="y",  # sort by yield
             )
-            hep.histplot(
-                collated["data"][discr][noSF_axis],
-                histtype="errorbar",
-                color="black",
-                label="Data",
-                yerr=True,
-                ax=ax,
-                xerr=do_xerr,
-                flow=args.flow,
-                sort="y",  # sort by yield
-            )
+            if not mc_only:
+                hep.histplot(
+                    collated["data"][discr][noSF_axis],
+                    histtype="errorbar",
+                    color="black",
+                    label="Data",
+                    yerr=True,
+                    ax=ax,
+                    xerr=do_xerr,
+                    flow=args.flow,
+                    sort="y",  # sort by yield
+                )
             hmc = collated["mc"][discr][SF_axis]
             MCerrorband(hmc, ax=ax, flow=args.flow)  # stat. unc. errorband
             sf_err = SFerror(collated, discr, flow=args.flow)
@@ -500,25 +528,27 @@ def main(args):
                 label="SF unc.",
                 fill_opts=other,
             )  # stat. unc. errorband
-            plotratio(
-                collated["data"][discr][noSF_axis],
-                collated["mc"][discr][noSF_axis],
-                ax=rax,
-                flow=args.flow,
-                xerr=do_xerr,
-            )
-            plotratio(
-                collated["data"][discr][noSF_axis],
-                hmc,
-                ax=rax,
-                ext_denom_error=sf_err,
-                error_opts={"color": "r", "marker": "v"},
-                denom_fill_opts=other,
-                clear=False,
-                label="SF unc.",
-                flow=args.flow,
-                xerr=do_xerr,
-            )
+            if not mc_only:
+                plotratio(
+                    collated["data"][discr][noSF_axis],
+                    collated["mc"][discr][noSF_axis],
+                    ax=rax,
+                    flow=args.flow,
+                    xerr=do_xerr,
+                )
+            if not mc_only:
+                plotratio(
+                    collated["data"][discr][noSF_axis],
+                    hmc,
+                    ax=rax,
+                    ext_denom_error=sf_err,
+                    error_opts={"color": "r", "marker": "v"},
+                    denom_fill_opts=other,
+                    clear=False,
+                    label="SF unc.",
+                    flow=args.flow,
+                    xerr=do_xerr,
+                )
 
         elif (
             "syst" in collated["mc"][discr].axes.name
@@ -562,26 +592,28 @@ def main(args):
                 sort="y",  # sort by yield
                 **color_config,
             )
-            hep.histplot(
-                collated["data"][discr][noSF_axis],
-                histtype="errorbar",
-                color="black",
-                label="Data",
-                yerr=True,
-                ax=ax,
-                xerr=do_xerr,
-                flow=args.flow,
-                sort="y",  # sort by yield
-            )
+            if not mc_only:
+                hep.histplot(
+                    collated["data"][discr][noSF_axis],
+                    histtype="errorbar",
+                    color="black",
+                    label="Data",
+                    yerr=True,
+                    ax=ax,
+                    xerr=do_xerr,
+                    flow=args.flow,
+                    sort="y",  # sort by yield
+                )
             hmc = collated["mc"][discr][noSF_axis]
             MCerrorband(hmc, ax=ax, flow=args.flow)  # stat. unc. errorband
-            rax = plotratio(
-                collated["data"][discr][noSF_axis],
-                hmc,
-                ax=rax,
-                flow=args.flow,
-                xerr=do_xerr,
-            )
+            if not mc_only:
+                rax = plotratio(
+                    collated["data"][discr][noSF_axis],
+                    hmc,
+                    ax=rax,
+                    flow=args.flow,
+                    xerr=do_xerr,
+                )
         elif "flav" in collated["mc"][discr].axes.name and args.split != "sample":
             splitflav_stack, labels, color_config = [], [], {}
             color_config["color"], color_config["alpha"] = [], []
@@ -620,26 +652,28 @@ def main(args):
                 sort="y",  # sort by yield
                 **color_config,
             )
-            hep.histplot(
-                collated["data"][discr][allaxis],
-                histtype="errorbar",
-                color="black",
-                label="Data",
-                yerr=True,
-                ax=ax,
-                xerr=do_xerr,
-                flow=args.flow,
-                sort="y",  # sort by yield
-            )
+            if not mc_only:
+                hep.histplot(
+                    collated["data"][discr][allaxis],
+                    histtype="errorbar",
+                    color="black",
+                    label="Data",
+                    yerr=True,
+                    ax=ax,
+                    xerr=do_xerr,
+                    flow=args.flow,
+                    sort="y",  # sort by yield
+                )
             hmc = collated["mc"][discr][allaxis]
             MCerrorband(hmc, ax=ax, flow=args.flow)
-            rax = plotratio(
-                collated["data"][discr][allaxis],
-                hmc,
-                ax=rax,
-                flow=args.flow,
-                xerr=do_xerr,
-            )
+            if not mc_only:
+                rax = plotratio(
+                    collated["data"][discr][allaxis],
+                    hmc,
+                    ax=rax,
+                    flow=args.flow,
+                    xerr=do_xerr,
+                )
         else:
             hmc = collated["mc"][discr][allaxis]
             if "sample" in args.split:
@@ -665,7 +699,7 @@ def main(args):
             else:
                 hep.histplot(
                     hmc,
-                    color="tab:orange",
+                    color="#3f90da",
                     histtype="fill",
                     label=["MC"],
                     yerr=True,
@@ -673,29 +707,33 @@ def main(args):
                     flow=args.flow,
                     sort="y",  # sort by yield
                 )
-            hep.histplot(
-                collated["data"][discr][allaxis],
-                histtype="errorbar",
-                color="black",
-                label="Data",
-                yerr=True,
-                ax=ax,
-                xerr=do_xerr,
-                flow=args.flow,
-                sort="y",  # sort by yield
-            )
+            if not mc_only:
+                hep.histplot(
+                    collated["data"][discr][allaxis],
+                    histtype="errorbar",
+                    color="black",
+                    label="Data",
+                    yerr=True,
+                    ax=ax,
+                    xerr=do_xerr,
+                    flow=args.flow,
+                    sort="y",  # sort by yield
+                )
             MCerrorband(hmc, ax=ax, flow=args.flow)  # stat. unc. errorband
-            rax = plotratio(
-                collated["data"][discr][allaxis],
-                hmc,
-                ax=rax,
-                flow=args.flow,
-                xerr=do_xerr,
-            )
+            if not mc_only:
+                rax = plotratio(
+                    collated["data"][discr][allaxis],
+                    hmc,
+                    ax=rax,
+                    flow=args.flow,
+                    xerr=do_xerr,
+                )
 
+        xax = ax if rax is None else rax  # axis with the x label and range
         ax.set_xlabel(None)
         ax.set_ylabel("Events")
-        rax.set_ylabel("Data/MC")
+        if rax is not None:
+            rax.set_ylabel("Data/MC")
         ax.ticklabel_format(style="sci", scilimits=(-3, 3))
         ax.get_yaxis().get_offset_text().set_position((-0.065, 1.05))
 
@@ -703,7 +741,7 @@ def main(args):
         xlabel = (
             args.xlabel
             if args.xlabel is not None
-            else collated["data"][discr].axes[-1].label
+            else collated["mc"][discr].axes[-1].label
         )  # Use label from stored hists
 
         ## FIXME: Set temporary fix for the x-axis
@@ -730,11 +768,11 @@ def main(args):
                 else SV_bininfo[discr]["displayname"]
             )
         elif discr.startswith(("stagdisc_", "stagscore_")):
-            xlabel = collated["data"][discr].axes[-1].label
+            xlabel = collated["mc"][discr].axes[-1].label
         else:
             xlabel = axes_name(discr)
 
-        rax.set_xlabel(xlabel)
+        xax.set_xlabel(xlabel)
 
         if "2D" in discr:
             xtickpos = [0.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5, 8.5, 9.5, 10.5]
@@ -751,7 +789,7 @@ def main(args):
                 "B3",
                 "B4",
             ]
-            rax.set_xticks(xtickpos, xticklabels)
+            xax.set_xticks(xtickpos, xticklabels)
 
         if "sample" in args.split:
             ax.legend(ncols=2, prop={"size": 16})
@@ -760,14 +798,20 @@ def main(args):
                 ncols=(2 if len(flav_set) > 3 else 1),
             )
 
-        rax.set_ylim(
-            float(args.ratio_range.split(",")[0]), float(args.ratio_range.split(",")[1])
-        )
+        if rax is not None:
+            rax.set_ylim(
+                float(args.ratio_range.split(",")[0]),
+                float(args.ratio_range.split(",")[1]),
+            )
         ax.set_ylim(bottom=0.0)
 
-        rax.autoscale(True, axis="x", tight=True)
+        xax.autoscale(True, axis="x", tight=True)
         xmin, xmax = autoranger(
-            collated["data"][discr][allaxis] + collated["mc"][discr][allaxis],
+            (
+                collated["mc"][discr][allaxis]
+                if mc_only
+                else collated["data"][discr][allaxis] + collated["mc"][discr][allaxis]
+            ),
             flow=args.flow,
         )
 
@@ -776,7 +820,7 @@ def main(args):
                 args.xrange.split(",")[1]
             )
 
-        rax.set_xlim(xmin, xmax)
+        xax.set_xlim(xmin, xmax)
 
         if "2Dbin_pt" in discr or "HFvLF_pt" in discr or "BvC_pt" in discr:
             input_txt += "\n" + low_edge + " < jet $p_T$ < " + up_edge + " GeV"
@@ -790,6 +834,8 @@ def main(args):
         name = "all"
         if args.split == "sample":
             name += "_sample"
+        if mc_only:
+            name += "_mconly"
 
         try:
             hep.mpl_magic(ax=ax)
@@ -827,6 +873,7 @@ def main(args):
             fig.savefig(
                 f"plot/{args.phase}_{args.ext}/unc_{discr}_inclusive{scale}_{name}.{filetype}",
                 bbox_inches="tight",
+                dpi=200 if filetype == "png" else None,
             )
 
         plt.close(fig)
