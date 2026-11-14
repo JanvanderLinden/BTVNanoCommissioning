@@ -91,18 +91,46 @@ def eos_env(path):
     return dict(os.environ, EOS_MGM_URL=eos_instance(path))
 
 
-def list_files(top):
-    """All files below `top`: `eos find` on EOS (one server-side call), os.walk otherwise."""
+def eos_find_files(top):
+    """All files below `top`, one server-side `eos find` (at most 100k files per call)."""
+    res = run(["eos", "find", "-f", top], env=eos_env(top), check=False)
+    if res.returncode != 0:
+        raise RuntimeError(
+            f"eos find -f {top} failed ({res.returncode}): {res.stderr.strip()}"
+            + (" -- more than 100k files in one job directory?" if res.returncode == 7 else "")
+        )
+    out = []
+    for line in res.stdout.splitlines():
+        line = line.strip()
+        if line.startswith("path="):
+            line = line[len("path=") :].split(" ")[0]
+        if line:
+            out.append(canonical_eos(line))
+    return out
+
+
+def eos_ls(top):
+    """(directories, files) directly in `top`, from `eos ls -l`."""
+    res = run(["eos", "ls", "-l", top], env=eos_env(top))
+    dirs, files = [], []
+    for line in res.stdout.splitlines():
+        fields = line.split()
+        if len(fields) < 2 or fields[-1] in (".", ".."):
+            continue
+        (dirs if line.startswith("d") else files).append(f"{top}/{fields[-1]}")
+    return dirs, files
+
+
+def list_files(top, workers=16):
+    """All files below `top`. On EOS: `eos ls` of `top`, then one `eos find` per
+    subdirectory in parallel (eos find returns at most 100k files per call); elsewhere
+    os.walk."""
     if eos_instance(top) and shutil.which("eos"):
-        res = run(["eos", "find", "-f", top], env=eos_env(top))
-        out = []
-        for line in res.stdout.splitlines():
-            line = line.strip()
-            if line.startswith("path="):
-                line = line[len("path=") :].split(" ")[0]
-            if line:
-                out.append(canonical_eos(line))
-        return out
+        dirs, files = eos_ls(top)
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            for found in pool.map(eos_find_files, dirs):
+                files.extend(found)
+        return [canonical_eos(f) for f in files]
     return [os.path.join(d, f) for d, _, files in os.walk(top) for f in files]
 
 
@@ -131,11 +159,11 @@ def remove_dir(path):
 # ------------------------------------------------------------------------------------------
 
 
-def find_inputs(output_dir):
+def find_inputs(output_dir, all_files):
     """hist files {job dir: file}, array files {group "<syst>/<dataset>": [files]} and the
-    array directories arrays_* (for deletion)."""
+    array directories arrays_* (for deletion), from the file list of output_dir."""
     hists, arrays, array_dirs = {}, defaultdict(list), set()
-    for f in list_files(output_dir):
+    for f in all_files:
         rel = os.path.relpath(f, output_dir)
         parts = rel.split(os.sep)
         top = parts[0]
@@ -273,14 +301,14 @@ def main():
 
     output_dir = canonical_eos(args.output_dir.rstrip("/"))
     name = args.name or os.path.basename(output_dir)
-    hists, arrays, array_dirs = find_inputs(output_dir)
+    all_files = list_files(output_dir)
+    hists, arrays, array_dirs = find_inputs(output_dir, all_files)
     print(f"{output_dir}: {len(hists)} histogram files, "
           f"{sum(map(len, arrays.values()))} array files in {len(arrays)} datasets")
     if not hists and not arrays:
         print("nothing to merge (no hists_*/*.coffea or arrays_*/... files)")
         return 1
 
-    all_files = list_files(output_dir)
     existing = set(all_files) if not args.force else set()
     base_tmp = args.tmpdir or os.environ.get("TMPDIR") or f"/tmp/{os.environ.get('USER', 'user')}"
     os.makedirs(base_tmp, exist_ok=True)
