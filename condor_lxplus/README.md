@@ -21,11 +21,28 @@ python condor_lxplus/checkoutputs.py <job_condor_dir>
 ```
 Then manually resubmit failed jobs with the newly created config.
 
-## hadd outputs
-hadd all outputs using
+## Merge the outputs of a submission
 ```
-python condor_lxplus/haddoutputs.py <job_output_dir>
+python condor_lxplus/mergeoutputs.py <outputDir> -j 8                   # merge and check
+python condor_lxplus/mergeoutputs.py <outputDir> -j 8 --delete-inputs   # + remove the per-job files
 ```
+merges the per-job outputs of one submission:
+- `hists_<n>/hists_<n>.coffea` -> `<outputDir>/hists_<name>.coffea` (`<name>`: base name of
+  `<outputDir>`, `--name`), the input of `scripts/plotdataMC.py`;
+- `arrays_*/<syst>/<dataset>/*.root` -> `<outputDir>/hadd/<syst>/<dataset>.root` (hadd with
+  `-f102`, see `haddFinal.py`), the input of `checkHadd.py` and `normalizeArrays.py`.
+
+The files are listed with `eos find` and read as `root://` URLs; the merged files are written
+to a local scratch directory (`--tmpdir`, default `$TMPDIR`) and copied to EOS once. Checks:
+the merged histograms contain every histogram of every input file, and every merged ROOT file
+has one `TotalEventCount` entry per input file. A merge that already exists is skipped if it
+is complete and reported otherwise (jobs that finished later: rerun with `-f`).
+`--delete-inputs` removes `hists_<n>/` and `arrays_*/` (`eos rm -r`, after a confirmation,
+`-y` to skip it) only when all checks passed; `merge_manifest_<time>.json` lists the inputs of
+each merged file. hadd comes from the environment, else from `--root-setup` (an LCG view
+`setup.sh`, sourced only for hadd). `--only hists|arrays` merges one of the two.
+
+`haddoutputs.py <job_output_dir>` writes the hadd commands for the arrays to a script instead.
 
 After normalizing (`condor_lxplus/normalizeArrays.py`, adds a final per-event `weight` branch),
 merge all datasets into one MC.root and one data.root per systematic using
