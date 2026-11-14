@@ -1,10 +1,25 @@
 # Light Condor submission script for lxplus
 
-The jobs submitted by this script rely on eos/afs being mounted on the condor nodes.
-**This is good for processing a few hundred files only.** Larger submissions are likely to make afs unstable.
+Submit from the checkout (AFS) with the conda environment active in which `pip install -e .`
+was run. The jobs do not use AFS:
 
-- It does not create a new installation of conda/mamba and instead uses a preinstalled conda env (you can replace this with your own conda/mamba path in the PATH variable, if needed).
-- It does not create a tarball of the BTVNanoComm code either, simply `cd`s to the working directory in eos/afs.
+- The environment and the code are shipped as tarballs from EOS (`--sandboxDir`, default
+  `$BTV_CONDOR_SANDBOX`, else `/eos/user/<u>/<user>/btv_condor_sandbox`), with the EOS xrootd
+  transfer plugin:
+  - `btv_env_<hash>.tar.gz`: the active conda environment packed with conda-pack (one-time
+    `pip install conda-pack` in the environment); built once per environment version (the
+    hash is over `conda list --explicit` and `pip freeze`), a few minutes and 1-2 GB;
+  - `btv_code_<hash>.tar.gz`: `runner.py` and `src/` (code, correction and model files);
+    rebuilt when any of these files changes.
+  The jobs unpack both in their scratch directory, take the code from there (the editable
+  install of the environment is dropped) and use the scratch directory as `$HOME`.
+- The split sample json goes to `<outputDir>/.condor_sandbox/split_samples.json`; only
+  `arguments.json` (and the executable and the proxy) come from the job directory.
+- `max_materialize = --maxRunning` (default 200) limits the jobs of a submission in the
+  queue at a time; the others are added as these finish. `request_disk = --disk` (10GB).
+- `--noSandbox` runs the jobs from the checkout and environment directly (the old way):
+  only for a few jobs. Hundreds of jobs reading a conda environment on AFS overload the AFS
+  server (CERN batch storage guidelines, KB0003076).
 - Ships a copy of the proxy with each job (`x509userproxy`).
 
 ## Example
@@ -51,13 +66,11 @@ python condor_lxplus/haddFinal.py <output_dir> --mc <hadd_normalized_dir> [<hadd
 ```
 
 
-## Pros
-- This is likely faster and will run out of the box.
+## Notes
 - Proxy handling works even if condor's native `user_proxy` method fails.
-
-## Cons
-- Relies on eos/afs mount, hence jobs will fail to run on condor nodes where the mount is unstable or when afs is overloaded. **You may need to keep releasing jobs in that case.**
-- Will not work where eos is not mounted, e.g. on CMSConnect nodes.
+- The condor user log stays on AFS (status updates only); stdout and stderr come back once per
+  job at the end. Keep the job output small.
+- Needs EOS for the sandbox and the outputs (not usable on CMSConnect).
 
 ## Outputs, proxy and logs
 

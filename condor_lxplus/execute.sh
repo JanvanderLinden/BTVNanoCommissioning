@@ -6,20 +6,50 @@ OUTPUTDIR=$3
 ENVPATH=$4
 NTHREADS=$5
 
-export HOME=`pwd`
-if [ -d /afs/cern.ch/user/${USER:0:1}/$USER ]; then
-  export HOME=/afs/cern.ch/user/${USER:0:1}/$USER  # crucial on lxplus condor but cannot set on cmsconnect
+WORKDIR=`pwd`
+# everything the job writes (caches, config) stays in its scratch directory
+export HOME=$WORKDIR
+export XDG_CACHE_HOME=$WORKDIR/.cache
+export MPLCONFIGDIR=$WORKDIR/.cache/matplotlib
+export NUMBA_CACHE_DIR=$WORKDIR/.cache/numba
+mkdir -p $XDG_CACHE_HOME $MPLCONFIGDIR $NUMBA_CACHE_DIR
+
+ENV_TAR=$(ls $WORKDIR/btv_env_*.tar.gz 2>/dev/null | head -1)
+CODE_TAR=$(ls $WORKDIR/btv_code_*.tar.gz 2>/dev/null | head -1)
+if [ -n "$ENV_TAR" ] && [ -n "$CODE_TAR" ]; then
+    # Sandbox (submitter.py default): conda environment and code from the tarballs that
+    # condor transferred from EOS, unpacked here -- nothing is read from AFS
+    echo "Unpacking $(basename $ENV_TAR) and $(basename $CODE_TAR)"
+    mkdir -p $WORKDIR/env $WORKDIR/code
+    tar -xzf $ENV_TAR -C $WORKDIR/env && rm -f $ENV_TAR
+    tar -xzf $CODE_TAR -C $WORKDIR/code && rm -f $CODE_TAR
+    # the editable install of BTVNanoCommissioning points to the submitting checkout: drop
+    # it, the code is taken from code/src
+    for sp in $WORKDIR/env/lib/python3*/site-packages; do
+        rm -f $sp/__editable__*BTVNanoCommissioning* $sp/__editable__*btvnanocommissioning* \
+              $sp/BTVNanoCommissioning.egg-link
+        if [ -f $sp/easy-install.pth ]; then sed -i '/BTVNanoCommissioning/d' $sp/easy-install.pth; fi
+    done
+    set +x
+    source $WORKDIR/env/bin/activate
+    conda-unpack
+    set -x
+    export PYTHONPATH=$WORKDIR/code/src
+    export PYTHONDONTWRITEBYTECODE=1
+    cd $WORKDIR/code
+else
+    # --noSandbox: checkout and environment on the shared filesystem (AFS); only for a few
+    # jobs
+    echo "WARNING: no sandbox tarballs, running from $COMMDIR with $ENVPATH"
+    cd $COMMDIR
+    export PATH="$ENVPATH:$PATH"
 fi
 env
 
-WORKDIR=`pwd`
-
-cd $COMMDIR
 # proxy shipped with the job (x509userproxy in submit.jdl; condor sets X509_USER_PROXY)
 export X509_USER_PROXY=${X509_USER_PROXY:-$COMMDIR/proxy}
 voms-proxy-info
-
-export PATH="$ENVPATH:$PATH" 
+python -c "import BTVNanoCommissioning, coffea; print('BTVNanoCommissioning from', BTVNanoCommissioning.__file__, '/ coffea', coffea.__version__)"
 
 # Build the sample json given the job id
 python -c "import json, os; flname = 'split_samples.json' if os.path.isfile(f'$WORKDIR/split_samples.json') else 'split_samples_resubmit.json';  json.dump(json.load(open(f'$WORKDIR/{flname}'))['$JOBID'], open('$WORKDIR/sample.json', 'w'), indent=4)"

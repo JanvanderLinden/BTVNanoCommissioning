@@ -1,7 +1,11 @@
 import os
 import json
+import time
 import shutil
+import hashlib
+import tarfile
 import argparse
+import tempfile
 import subprocess
 
 
@@ -23,6 +27,125 @@ def get_proxy_path() -> str:
         "voms-proxy-info -path", shell=True, text=True
     ).strip()
     return proxy
+
+
+# ------------------------------------------------------------------------------------------
+# Job sandbox: the jobs do not use AFS. The conda environment (conda-pack) and the code
+# (runner.py + src/) are packed into tarballs on EOS, content-hashed so that they are only
+# rebuilt when the environment or the code changes; the jobs get them with the EOS xrootd
+# transfer plugin and unpack them in their local scratch directory (execute.sh).
+# ------------------------------------------------------------------------------------------
+
+
+def eos_url(path):
+    """root:// URL of an EOS path (must match checkoutputs.py)."""
+    if path.startswith("root://"):
+        return path.rstrip("/")
+    if path.startswith("/eos/home-"):
+        path = f"/eos/user/{path[10]}/{path[12:]}"
+    if path.startswith("/eos/user/"):
+        return "root://eosuser.cern.ch/" + path.rstrip("/")
+    if path.startswith("/eos/"):
+        return "root://eoscms.cern.ch/" + path.rstrip("/")
+    raise SystemExit(f"ERROR: not an EOS path: '{path}'")
+
+
+def _split_url(url):
+    rest = url[len("root://") :]
+    host, path = rest.split("/", 1)
+    return f"root://{host}", "/" + path.lstrip("/")
+
+
+def xrd_exists(url):
+    host, path = _split_url(url)
+    return subprocess.run(["xrdfs", host, "stat", path], capture_output=True).returncode == 0
+
+
+def xrdcp_to(local, url):
+    for attempt in range(3):
+        res = subprocess.run(["xrdcp", "-f", "-p", "-N", local, url], capture_output=True, text=True)
+        if res.returncode == 0:
+            return
+        time.sleep(10 * (attempt + 1))
+    raise SystemExit(f"ERROR: xrdcp {local} -> {url} failed:\n{res.stderr}")
+
+
+def _tmpdir():
+    base = os.environ.get("TMPDIR") or f"/tmp/{os.environ.get('USER', 'user')}"
+    os.makedirs(base, exist_ok=True)
+    return tempfile.mkdtemp(prefix="btv_sandbox_", dir=base)
+
+
+def env_tarball(prefix, sandbox_url):
+    """URL of the conda-pack tarball of the environment `prefix` in sandbox_url; built and
+    uploaded if no tarball of the same package set exists yet."""
+    listing = subprocess.run(
+        ["conda", "list", "--explicit", "--md5", "-p", prefix],
+        capture_output=True, text=True, check=True,
+    ).stdout
+    pip = subprocess.run(
+        [os.path.join(prefix, "bin", "python"), "-m", "pip", "freeze", "--exclude-editable"],
+        capture_output=True, text=True, check=True,
+    ).stdout
+    digest = hashlib.sha1((listing + pip).encode()).hexdigest()[:12]
+    url = f"{sandbox_url}/btv_env_{digest}.tar.gz"
+    if xrd_exists(url):
+        print(f"Environment tarball: {url} (exists)")
+        return url
+    if not shutil.which("conda-pack"):
+        raise SystemExit(
+            "ERROR: conda-pack is needed once per environment version to pack the environment "
+            "for the jobs: pip install conda-pack  (in the active environment)"
+        )
+    tmp = _tmpdir()
+    out = os.path.join(tmp, os.path.basename(url))
+    print(f"Packing {prefix} with conda-pack (once per environment version, a few minutes)")
+    subprocess.run(
+        ["conda-pack", "-p", prefix, "-o", out, "--ignore-editable-packages",
+         "--ignore-missing-files", "--compress-level", "4", "-j", "-1"],
+        check=True,
+    )
+    print(f"Uploading {os.path.getsize(out) / 1e9:.2f} GB to {url}")
+    xrdcp_to(out, url)
+    shutil.rmtree(tmp, ignore_errors=True)
+    return url
+
+
+def _code_files(base_dir):
+    files = [os.path.join(base_dir, "runner.py")]
+    for root, dirs, names in os.walk(os.path.join(base_dir, "src")):
+        dirs[:] = sorted(d for d in dirs if d != "__pycache__" and not d.endswith(".egg-info"))
+        files += [os.path.join(root, n) for n in sorted(names) if not n.endswith((".pyc", ".pyo"))]
+    return files
+
+
+def code_tarball(base_dir, sandbox_url):
+    """URL of the tarball of runner.py and src/ (code, correction and model files) in
+    sandbox_url; built and uploaded if no tarball with the same content exists yet."""
+    files = _code_files(base_dir)
+    h = hashlib.sha1()
+    for f in files:
+        h.update(os.path.relpath(f, base_dir).encode())
+        with open(f, "rb") as fin:
+            h.update(hashlib.sha1(fin.read()).digest())
+    url = f"{sandbox_url}/btv_code_{h.hexdigest()[:12]}.tar.gz"
+    if xrd_exists(url):
+        print(f"Code tarball: {url} (exists)")
+        return url
+    tmp = _tmpdir()
+    out = os.path.join(tmp, os.path.basename(url))
+    with tarfile.open(out, "w:gz") as tar:
+        for f in files:
+            tar.add(f, arcname=os.path.relpath(f, base_dir))
+    print(f"Uploading code tarball ({os.path.getsize(out) / 1e6:.0f} MB) to {url}")
+    xrdcp_to(out, url)
+    shutil.rmtree(tmp, ignore_errors=True)
+    return url
+
+
+def default_sandbox_dir():
+    user = os.environ.get("USER", "")
+    return os.environ.get("BTV_CONDOR_SANDBOX") or f"/eos/user/{user[:1]}/{user}/btv_condor_sandbox"
 
 
 def get_condor_submitter_parser(parser):
@@ -60,6 +183,31 @@ def get_condor_submitter_parser(parser):
         default=os.environ.get("BTV_CONDOR_ACCOUNTING_GROUP"),
         help="HTCondor accounting group (+AccountingGroup), e.g. group_u_CMST3.all "
         "(default: $BTV_CONDOR_ACCOUNTING_GROUP, else none)",
+    )
+    parser.add_argument(
+        "--sandboxDir",
+        default=default_sandbox_dir(),
+        help="EOS directory of the environment and code tarballs of the jobs "
+        "(default: $BTV_CONDOR_SANDBOX, else /eos/user/<u>/<user>/btv_condor_sandbox)",
+    )
+    parser.add_argument(
+        "--maxRunning",
+        type=int,
+        default=200,
+        help="Maximum number of jobs of this submission in the queue at a time "
+        "(max_materialize; the others are added as these finish). Default: %(default)s",
+    )
+    parser.add_argument(
+        "--disk",
+        default="10GB",
+        help="request_disk per job (unpacked environment + outputs). Default: %(default)s",
+    )
+    parser.add_argument(
+        "--noSandbox",
+        action="store_true",
+        help="Run the jobs from this checkout and conda environment directly (shared "
+        "filesystem, e.g. AFS). Do not use for more than a few jobs: hundreds of jobs "
+        "reading a conda environment on AFS overload the AFS server.",
     )
     parser.add_argument(
         "--noSpool", action="store_true", help="Submit condor jobs without spooling."
@@ -316,6 +464,25 @@ if __name__ == "__main__":
     with open(os.path.join(job_dir, "jobnum_list.txt"), "w") as f:
         f.write("\n".join([str(i) for i in range(counter)]))
 
+    ## job inputs: small files from the job directory; with the sandbox, the environment
+    ## and code tarballs and the split json from EOS (xrootd transfer plugin), so that the
+    ## jobs do not read from AFS
+    transfer_inputs = [f"{job_dir}/arguments.json"]
+    if args.noSandbox:
+        print(
+            "WARNING: --noSandbox: the jobs run from this checkout and environment. "
+            "Keep the number of jobs small (AFS overload)."
+        )
+        transfer_inputs.append(f"{job_dir}/split_samples.json")
+    else:
+        sandbox_url = eos_url(args.sandboxDir)
+        transfer_inputs.append(env_tarball(os.path.dirname(envpath.rstrip("/")), sandbox_url))
+        transfer_inputs.append(code_tarball(base_dir, sandbox_url))
+        # split json next to the outputs, where checkoutputs.py -u expects it
+        split_url = eos_url(args.outputDir) + "/.condor_sandbox/split_samples.json"
+        xrdcp_to(os.path.join(job_dir, "split_samples.json"), split_url)
+        transfer_inputs.append(split_url)
+
     if "/eos/" in job_dir:
         print(
             "WARNING: Submitting from /eos. Log files will NOT be created.\nTo debug/retrieve logs, use `condor_transfer_data <job id>` after a job fails/terminates."
@@ -341,6 +508,8 @@ Executable = {executable}
 Arguments = $(JOBNUM) {base_dir} {outputDir} {envpath} {nthreads}
 
 request_cpus = {nthreads}
+request_disk = {disk}
+max_materialize = {max_running}
 
 +JobFlavour = "workday"
 {accounting}
@@ -367,7 +536,9 @@ Queue JOBNUM from {jobnum_file}
         nthreads=args.nCPU,
         accounting=f'+AccountingGroup = "{args.accountingGroup}"' if args.accountingGroup else "",
         log_dir=f"{job_dir}/log",
-        transfer_input_files=f"{job_dir}/arguments.json,{job_dir}/split_samples.json,{job_dir}/jobnum_list.txt",
+        transfer_input_files=",".join(transfer_inputs),
+        disk=args.disk,
+        max_running=args.maxRunning,
         jobnum_file=f"{job_dir}/jobnum_list.txt",
         transfer_output=transfer_output,
         job_dir=job_dir,
