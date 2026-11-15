@@ -24,7 +24,6 @@ import glob
 import math
 
 import hist
-import numpy as np
 
 
 def xrootd_url(path):
