@@ -20,20 +20,28 @@ if [ -n "$ENV_TAR" ] && [ -n "$CODE_TAR" ]; then
     # Sandbox (submitter.py default): conda environment and code from the tarballs that
     # condor transferred from EOS, unpacked here -- nothing is read from AFS
     echo "Unpacking $(basename $ENV_TAR) and $(basename $CODE_TAR)"
+    # a failure here fails every job in the same way: exit code 99 puts the job on hold
+    # (on_exit_hold in submit.jdl) instead of requeueing it
+    setup_failed() { echo "ERROR: sandbox setup failed: $1" >&2; exit 99; }
     mkdir -p $WORKDIR/env $WORKDIR/code
-    tar -xzf $ENV_TAR -C $WORKDIR/env && rm -f $ENV_TAR
-    tar -xzf $CODE_TAR -C $WORKDIR/code && rm -f $CODE_TAR
+    tar -xzf $ENV_TAR -C $WORKDIR/env || setup_failed "unpacking $(basename $ENV_TAR)"
+    rm -f $ENV_TAR
+    tar -xzf $CODE_TAR -C $WORKDIR/code || setup_failed "unpacking $(basename $CODE_TAR)"
+    rm -f $CODE_TAR
+    set +x
+    source $WORKDIR/env/bin/activate || setup_failed "activating the environment"
+    # conda-unpack rewrites the packing prefix in the files of the environment, including
+    # those of the editable install: run it before those are removed
+    conda-unpack || setup_failed "conda-unpack"
+    set -x
     # the editable install of BTVNanoCommissioning points to the submitting checkout: drop
     # it, the code is taken from code/src
-    for sp in $WORKDIR/env/lib/python3*/site-packages; do
+    for sp in $WORKDIR/env/lib/python3.*/site-packages; do
+        [ -d "$sp" ] || continue
         rm -f $sp/__editable__*BTVNanoCommissioning* $sp/__editable__*btvnanocommissioning* \
               $sp/BTVNanoCommissioning.egg-link
         if [ -f $sp/easy-install.pth ]; then sed -i '/BTVNanoCommissioning/d' $sp/easy-install.pth; fi
     done
-    set +x
-    source $WORKDIR/env/bin/activate
-    conda-unpack
-    set -x
     export PYTHONPATH=$WORKDIR/code/src
     export PYTHONDONTWRITEBYTECODE=1
     cd $WORKDIR/code
@@ -49,7 +57,8 @@ env
 # proxy shipped with the job (x509userproxy in submit.jdl; condor sets X509_USER_PROXY)
 export X509_USER_PROXY=${X509_USER_PROXY:-$COMMDIR/proxy}
 voms-proxy-info
-python -c "import BTVNanoCommissioning, coffea; print('BTVNanoCommissioning from', BTVNanoCommissioning.__file__, '/ coffea', coffea.__version__)"
+python -c "import BTVNanoCommissioning, coffea; print('BTVNanoCommissioning from', BTVNanoCommissioning.__file__, '/ coffea', coffea.__version__)" \
+    || { echo "ERROR: BTVNanoCommissioning/coffea not importable" >&2; exit 99; }
 
 # Build the sample json given the job id
 python -c "import json, os; flname = 'split_samples.json' if os.path.isfile(f'$WORKDIR/split_samples.json') else 'split_samples_resubmit.json';  json.dump(json.load(open(f'$WORKDIR/{flname}'))['$JOBID'], open('$WORKDIR/sample.json', 'w'), indent=4)"

@@ -198,6 +198,14 @@ def get_condor_submitter_parser(parser):
         "(max_materialize; the others are added as these finish). Default: %(default)s",
     )
     parser.add_argument(
+        "--jobFlavour",
+        default="workday",
+        choices=["espresso", "microcentury", "longlunch", "workday", "tomorrow",
+                 "testmatch", "nextweek"],
+        help="CERN job flavour = maximum run time (20 min, 1 h, 2 h, 8 h, 1 d, 3 d, 1 w); "
+        "a job running longer is killed before it copies its outputs. Default: %(default)s",
+    )
+    parser.add_argument(
         "--disk",
         default="10GB",
         help="request_disk per job (unpacked environment + outputs). Default: %(default)s",
@@ -511,8 +519,10 @@ request_cpus = {nthreads}
 request_disk = {disk}
 max_materialize = {max_running}
 
-+JobFlavour = "workday"
++JobFlavour = "{job_flavour}"
 {accounting}
+# name shown by condor_q (BATCH_NAME) instead of ID_<cluster>
+JobBatchName = {batch_name}
 
 Log        = {log_dir}/job.log_$(Cluster)
 Output     = {job_dir}/out/job.out_$(Cluster)-$(Process)
@@ -524,6 +534,10 @@ transfer_input_files    = {transfer_input_files}
 {transfer_output}
 x509userproxy           = {proxy}
 on_exit_remove   = (ExitBySignal == False) && (ExitCode == 0)
+# exit code 99 = setup failure of the job (execute.sh): the same for every attempt, so hold
+# the job instead of requeueing it (condor_q -hold -af HoldReason, the err file has the reason)
+on_exit_hold        = (ExitBySignal == False) && (ExitCode == 99)
+on_exit_hold_reason = "job setup failed (exit code 99), see the err file of the job"
 max_retries      = 3
 requirements     = (Machine =!= split(LastRemoteHost, "@")[1])
 
@@ -538,6 +552,8 @@ Queue JOBNUM from {jobnum_file}
         log_dir=f"{job_dir}/log",
         transfer_input_files=",".join(transfer_inputs),
         disk=args.disk,
+        batch_name=args.jobName,
+        job_flavour=args.jobFlavour,
         max_running=args.maxRunning,
         jobnum_file=f"{job_dir}/jobnum_list.txt",
         transfer_output=transfer_output,
@@ -548,7 +564,17 @@ Queue JOBNUM from {jobnum_file}
         f.write(jdl_template)
 
     if args.submit:
-        os.system(f"condor_submit {spool} {job_dir}/submit.jdl")
+        cmd = ["condor_submit"] + ([spool] if spool else []) + [f"{job_dir}/submit.jdl"]
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        print(res.stdout.strip())
+        if res.returncode != 0:
+            # a refused submission must not look like a success (C_submit_stag.sh counts it)
+            print(res.stderr.strip())
+            raise SystemExit(
+                f"ERROR: condor_submit failed ({res.returncode}) for {job_dir}/submit.jdl"
+            )
+        with open(os.path.join(job_dir, "condor_submit.log"), "w") as f:
+            f.write(res.stdout + res.stderr)
     else:
         print(
             f"Setup completed. Now submit the condor jobs by:\n  condor_submit {spool} {job_dir}/submit.jdl"

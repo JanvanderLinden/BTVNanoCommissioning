@@ -77,6 +77,10 @@ if [ -d /cvmfs/grid.cern.ch/etc/grid-security/certificates ]; then
 fi
 EOF
 
+# conda-pack: packs the environment for the condor jobs (condor_lxplus/submitter.py);
+# in test_env.yml, needed for environments created before
+pip install conda-pack
+
 # keep later installs into this environment on conda-forge only
 conda config --env --add channels conda-forge
 conda config --env --set channel_priority strict

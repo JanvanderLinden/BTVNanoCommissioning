@@ -19,6 +19,7 @@ dependencies:
   - arrow
   - dask-jobqueue
   - alive-progress
+  - conda-pack   # packs the environment for the condor jobs (condor_lxplus/submitter.py)
   - numpy==1.26.4
   - numba==0.66.0
   - llvmlite==0.48.0
