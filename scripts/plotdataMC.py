@@ -55,6 +55,104 @@ def flav_components(h, sel, flav_set, hf_split=False):
         out.append((label, comp))
     return out
 
+
+# tt1L-s control histograms: flavour class of the sJet (stag_helpers.flav_class:
+# 0 = g/unmatched, 1 = ud, 3 = s, 4 = c, 5 = b) -> s-tagging flavour index (STAG_FLAVOURS)
+JFLAV_TO_STAGFLAV = {5: 0, 4: 2, 3: 4, 1: 5, 0: 6}
+
+
+def jflav_to_stagflav(h):
+    """Histogram with the tt1L-s `jflav` axis -> the same histogram with the s-tagging
+    flavour axis `flav` (b, bb, c, cc, s, ud, g, PU), so that the flavour split of the
+    stag_* workflows applies (g contains the unmatched jets)."""
+    iax = h.axes.name.index("jflav")
+    new_ax = hist.axis.IntCategory(list(range(len(STAG_FLAVOURS))), name="flav",
+                                   label="Jet flavour (" + ", ".join(STAG_FLAVOURS) + ")")
+    axes = list(h.axes)
+    axes[iax] = new_ax
+    hn = hist.Hist(*axes, storage=h.storage_type())
+    old, new = h.view(flow=True), hn.view(flow=True)
+    for i, val in enumerate(h.axes["jflav"]):
+        if val not in JFLAV_TO_STAGFLAV:
+            continue
+        so = [slice(None)] * h.ndim
+        sn = [slice(None)] * h.ndim
+        so[iax], sn[iax] = i, JFLAV_TO_STAGFLAV[val]
+        new[tuple(sn)] = old[tuple(so)]
+    return hn
+
+
+def _flow_layout(h1d, arr_flow, flow):
+    """1D array with all flow bins of the 1D histogram h1d -> the bins as plotted with
+    `flow` (none: inner bins, sum: flow added to the first/last bin, show: with flow bins)"""
+    ax = h1d.axes[0]
+    lo = 1 if ax.traits.underflow else 0
+    hi = 1 if ax.traits.overflow else 0
+    inner = np.array(arr_flow[lo : len(arr_flow) - hi], dtype=float)
+    if flow == "sum":
+        if lo:
+            inner[0] += arr_flow[0]
+        if hi:
+            inner[-1] += arr_flow[-1]
+        return inner
+    if flow == "show":
+        under = arr_flow[:1] if lo else np.zeros(1)
+        over = arr_flow[-1:] if hi else np.zeros(1)
+        return np.concatenate([under, inner, over])
+    return inner
+
+
+def syst_band(h, sel, nominal, flow, exclude=()):
+    """Total systematic uncertainty of the MC sum: per variation pair <name>Up/<name>Down
+    of the `syst` axis the larger upward and downward deviation from `nominal` per bin,
+    added in quadrature. Returns (down, up, [names]) in the bin layout of `flow`."""
+    names = [str(s) for s in h.axes["syst"]]
+    pairs = sorted(
+        n[:-2] for n in names
+        if n.endswith("Up") and f"{n[:-2]}Down" in names
+        and not any(fnmatch.fnmatch(n[:-2], p) for p in exclude)
+    )
+
+    def vals(label):
+        h1 = h[{**sel, "syst": label}]
+        return _flow_layout(h1, h1.view(flow=True)["value"], flow)
+
+    nom = vals(nominal)
+    up2 = np.zeros_like(nom)
+    dn2 = np.zeros_like(nom)
+    for p in pairs:
+        u, d = vals(f"{p}Up") - nom, vals(f"{p}Down") - nom
+        up2 += np.maximum(np.maximum(u, d), 0.0) ** 2
+        dn2 += np.maximum(np.maximum(-u, -d), 0.0) ** 2
+    return np.sqrt(dn2), np.sqrt(up2), pairs
+
+
+# W+c: charge combinations of the OS/SS axis (osss = 1: OS, -1: SS)
+OSSS_MODES = {
+    "os-ss": ("OSminusSS", "OS-SS"),
+    "os+ss": ("OSplusSS", "OS+SS"),
+    "os": ("OS", "OS"),
+    "ss": ("SS", "SS"),
+}
+
+
+def osss_reduce(h, mode):
+    if mode == "os":
+        return h[{"osss": hist.loc(1)}]
+    if mode == "ss":
+        return h[{"osss": hist.loc(-1)}]
+    if mode == "os+ss":
+        return h[{"osss": sum}]
+    return h[{"osss": hist.loc(1)}] + h[{"osss": hist.loc(-1)}] * -1
+
+
+def plot_edges(h1d, flow):
+    edges = h1d.axes[0].edges
+    if flow == "show":
+        w0, w1 = edges[1] - edges[0], edges[-1] - edges[-2]
+        edges = np.array([edges[0] - 2 * w0, *edges, edges[-1] + 2 * w1])
+    return edges
+
 bininfo = get_definitions()
 SV_bininfo = get_definitions(include_definitions=["SV"])
 
@@ -147,10 +245,19 @@ def get_parser():
         help="Decomposition of MC samples. Default is split to jet flavor, possible to split by group of MC samples. Combination of jetflavor+ sample split is also possible",
     )
     parser.add_argument(
+        "--osss",
+        type=str,
+        default="os-ss,os+ss,os,ss",
+        help="Histograms with an OS/SS axis (W+c): charge combinations to plot, one plot "
+        "each, split by ',': os-ss, os+ss, os, ss. Default: all four",
+    )
+    parser.add_argument(
         "--splitOSSS",
         type=int,
         default=None,
-        help="Only for W+c phase space, split opposite sign(1) and same sign events(-1), if not specified, the combined OS-SS phase space is used",
+        choices=[1, -1],
+        help="Only for W+c phase space: only opposite sign (1) or only same sign (-1) "
+        "events (replaces --osss)",
     )
     parser.add_argument(
         "--save-as",
@@ -163,6 +270,39 @@ def get_parser():
         type=str,
         default="Preliminary",
         help="CMS label to put on the plot, default is Preliminary",
+    )
+    parser.add_argument(
+        "-o",
+        "--outdir",
+        type=str,
+        default=None,
+        help="Output directory; the plots are then named <variable>[__<category>]_<split>"
+        "[_mconly][_log].<ext>. Default: plot/<phase>_<ext>/unc_<variable>_inclusive_*.<ext>",
+    )
+    parser.add_argument(
+        "--syst-band",
+        action="store_true",
+        help="Draw the total uncertainty (MC stat. + all <name>Up/<name>Down variations of "
+        "the syst axis, added in quadrature) as a band in the main and the ratio panel",
+    )
+    parser.add_argument(
+        "--syst-exclude",
+        type=str,
+        default="",
+        help="Variations (without Up/Down) left out of --syst-band, split by ',', wildcards "
+        "allowed, e.g. 'PDF*,UEPS_*'",
+    )
+    parser.add_argument(
+        "--categories",
+        type=str,
+        default="*",
+        help="Histograms with a `category` axis (selections, e.g. tt1L-s): one plot per "
+        "category matching these patterns (split by ','). Default: all categories",
+    )
+    parser.add_argument(
+        "--also-log",
+        action="store_true",
+        help="Save every plot a second time with log scale on the y axis (suffix _log)",
     )
 
     return parser.parse_args()
@@ -200,8 +340,8 @@ def main(args):
 
     mergemap = {}
     ## create merge map from sample set/data MC
-    if not os.path.isdir(f"plot/{args.phase}_{args.ext}/"):
-        os.makedirs(f"plot/{args.phase}_{args.ext}/")
+    outdir = args.outdir if args.outdir else f"plot/{args.phase}_{args.ext}"
+    os.makedirs(outdir, exist_ok=True)
     if not any(".coffea" in o for o in output.keys()):
         if "sample" in args.split:
             mergemap = sample_mergemap
@@ -241,18 +381,16 @@ def main(args):
         "DY": "DY+jets",
         "QCD": "QCD",
         "semilep": r"t$\bar{t}$ semileptonic",
+        "tt1L": r"t$\bar{t}$ semileptonic",
         "dilep": r"t$\bar{t}$ dileptonic",
         "dijet": "QCD dijet",
     }
     phase_nj_map = {"semilep": 4, "dilep": 2}
-    osss_suffix = {1: " OS", -1: " SS"}
 
     input_txt = next(
         (label for key, label in phase_label_map.items() if key in args.phase),
         "placeholder",
     )
-    if "Wc" in args.phase:
-        input_txt += osss_suffix.get(args.splitOSSS, " OS-SS")
     for key, nj_val in phase_nj_map.items():
         if key in args.phase:
             nj = nj_val
@@ -290,6 +428,72 @@ def main(args):
             for var in fnmatch.filter(all_vars, pattern)
         ]
 
+    # tt1L-s: sJet flavour classes -> s-tagging flavour axis; histograms with a category
+    # axis (selections) -> one entry <variable>__<category> per selected category;
+    # histograms with an OS/SS axis (W+c) -> one entry <variable>__<OSminusSS|OSplusSS|OS|SS>
+    # per charge combination. The expanded histograms replace the original ones.
+    cat_patterns = args.categories.split(",")
+    category_of = {}
+    base_of = {}
+    expanded_set = []
+    for discr in var_set:
+        hmc0 = collated["mc"].get(discr)
+        if not isinstance(hmc0, hist.Hist):
+            expanded_set.append(discr)
+            continue
+        if "jflav" in hmc0.axes.name:
+            for sample in collated:
+                h0 = collated[sample].get(discr)
+                if isinstance(h0, hist.Hist) and "jflav" in h0.axes.name:
+                    collated[sample][discr] = jflav_to_stagflav(h0)
+        if "category" not in collated["mc"][discr].axes.name:
+            expanded_set.append(discr)
+            continue
+        cats = [
+            c for c in collated["mc"][discr].axes["category"]
+            if any(fnmatch.fnmatch(c, p) for p in cat_patterns)
+        ]
+        for c in cats:
+            key = f"{discr}__{c}"
+            for sample in collated:
+                h0 = collated[sample].get(discr)
+                if isinstance(h0, hist.Hist) and "category" in h0.axes.name:
+                    collated[sample][key] = h0[{"category": c}]
+            category_of[key] = c
+            base_of[key] = discr
+            expanded_set.append(key)
+        for sample in collated:
+            collated[sample].pop(discr, None)
+
+    if args.splitOSSS is not None:
+        osss_modes = ["os" if args.splitOSSS == 1 else "ss"]
+    else:
+        osss_modes = [m for m in args.osss.split(",") if m]
+        for m in osss_modes:
+            if m not in OSSS_MODES:
+                raise SystemExit(f"--osss: unknown {m} (choices: {', '.join(OSSS_MODES)})")
+    osss_label = {}
+    var_set = []
+    for key in expanded_set:
+        h0 = collated["mc"].get(key)
+        if not isinstance(h0, hist.Hist) or "osss" not in h0.axes.name:
+            var_set.append(key)
+            continue
+        for m in osss_modes:
+            key2 = f"{key}__{OSSS_MODES[m][0]}"
+            for sample in collated:
+                hs = collated[sample].get(key)
+                if isinstance(hs, hist.Hist) and "osss" in hs.axes.name:
+                    collated[sample][key2] = osss_reduce(hs, m)
+            osss_label[key2] = OSSS_MODES[m][1]
+            if key in category_of:
+                category_of[key2] = category_of[key]
+            base_of[key2] = base_of.get(key, key)
+            var_set.append(key2)
+        for sample in collated:
+            collated[sample].pop(key, None)
+    syst_exclude = [p for p in args.syst_exclude.split(",") if p]
+
     for index, discr in enumerate(var_set):
         # text box of this plot: phase-space label (+ jet pT bin of pT-binned discriminants)
         var_txt = input_txt
@@ -323,20 +527,7 @@ def main(args):
             up_edge = tmp[1]
 
         ## axis info
-        allaxis = {}
-        if "Wc" in args.phase:
-            if args.splitOSSS is None:  # OS-SS
-                for sample in collated.keys():
-                    if discr not in collated[sample].keys():
-                        continue
-                    collated[sample][discr] = (
-                        collated[sample][discr][{"osss": 0}]
-                        + collated[sample][discr][{"osss": 1}] * -1
-                    )
-            elif args.splitOSSS == 1:
-                allaxis["osss"] = 0  # opposite sign
-            elif args.splitOSSS == -1:
-                allaxis["osss"] = 1  # same sign
+        allaxis = {}  # (OS/SS axis: already reduced in the expansion above)
 
         if "flav" in collated["mc"][discr].axes.name:
             allaxis["flav"] = sum
@@ -495,6 +686,8 @@ def main(args):
                 stack=True,
                 label=labels,
                 histtype="fill",
+                edgecolor="black",  # black borders of the stacked histograms
+                linewidth=1,
                 yerr=True,
                 ax=ax,
                 flow=args.flow,
@@ -592,6 +785,8 @@ def main(args):
                 splitflav_stack,
                 stack=True,
                 histtype="fill",
+                edgecolor="black",  # black borders of the stacked histograms
+                linewidth=1,
                 label=labels,
                 yerr=True,
                 ax=ax,
@@ -652,6 +847,8 @@ def main(args):
                 splitflav_stack,
                 stack=True,
                 histtype="fill",
+                edgecolor="black",  # black borders of the stacked histograms
+                linewidth=1,
                 label=labels,
                 yerr=True,
                 ax=ax,
@@ -691,6 +888,8 @@ def main(args):
                         if s != "mc" and s != "data"
                     ],
                     histtype="fill",
+                    edgecolor="black",  # black borders of the stacked histograms
+                    linewidth=1,
                     stack=True,
                     label=[s for s in collated.keys() if s != "mc" and s != "data"],
                     yerr=True,
@@ -708,6 +907,8 @@ def main(args):
                     hmc,
                     color="#3f90da",
                     histtype="fill",
+                    edgecolor="black",  # black borders of the stacked histograms
+                    linewidth=1,
                     label=["MC"],
                     yerr=True,
                     ax=ax,
@@ -736,6 +937,33 @@ def main(args):
                     xerr=do_xerr,
                 )
 
+        # total uncertainty band: MC stat. + systematic variations of the syst axis
+        if args.syst_band:
+            hfull = collated["mc"][discr]
+            if "syst" not in hfull.axes.name:
+                print(f"{discr}: no syst axis, only the MC stat. uncertainty is drawn")
+            else:
+                nominal = allaxis["syst"]
+                sel = {k: v for k, v in allaxis.items() if k != "syst"}
+                if "flav" in hfull.axes.name:
+                    sel["flav"] = sum
+                hnom = hfull[{**sel, "syst": nominal}]
+                err_dn, err_up, used = syst_band(hfull, sel, nominal, args.flow, syst_exclude)
+                nom = _flow_layout(hnom, hnom.view(flow=True)["value"], args.flow)
+                stat = np.sqrt(_flow_layout(hnom, hnom.view(flow=True)["variance"], args.flow))
+                tot_dn, tot_up = np.hypot(err_dn, stat), np.hypot(err_up, stat)
+                edges = plot_edges(hnom, args.flow)
+                band = {"lw": 0, "color": "#9494AE", "alpha": 0.45, "fill": True}
+                ax.stairs(nom + tot_up, edges=edges, baseline=nom - tot_dn,
+                          label=r"Stat. $\oplus$ syst. unc.", **band)
+                if rax is not None:
+                    with np.errstate(divide="ignore", invalid="ignore"):
+                        safe = np.where(nom != 0, nom, np.nan)
+                        rax.stairs(1 + tot_up / safe, edges=edges,
+                                   baseline=1 - tot_dn / safe, **band)
+                print(f"{discr}: syst. band from {len(used)} variations"
+                      + (f" ({', '.join(used)})" if used else " (none found)"))
+
         xax = ax if rax is None else rax  # axis with the x label and range
         ax.set_xlabel(None)
         ax.set_ylabel("Events")
@@ -754,6 +982,20 @@ def main(args):
         ## FIXME: Set temporary fix for the x-axis
         if args.xlabel is not None:
             args.xlabel.split(",")[index]
+        elif discr in category_of:
+            # one category of a histogram with selections: the label of the plotted axis
+            xlabel = collated["mc"][discr].axes[-1].label
+        elif base_of.get(discr, discr) != discr:
+            # one charge combination: as the original histogram
+            base = base_of[discr]
+            xlabel = (
+                collated["mc"][discr].axes[-1].label
+                if base.startswith(("stagdisc_", "stagscore_"))
+                or collated["mc"][discr].axes[-1].name == "discr"
+                or "DeepJet" in base or "DeepCSV" in base or "PFCands" in base
+                or "JetSVs_" in base
+                else axes_name(base)
+            )
         elif "DeepJet" in discr or "DeepCSV" in discr or "PFCands" in discr:
             xlabel = (
                 bininfo[discr]["displayname"]
@@ -834,6 +1076,10 @@ def main(args):
 
         if "2Dbin_pt" in discr or "HFvLF_pt" in discr or "BvC_pt" in discr:
             var_txt += "\n" + low_edge + " < jet $p_T$ < " + up_edge + " GeV"
+        if discr in category_of:
+            var_txt += "\n" + category_of[discr]
+        if discr in osss_label:
+            var_txt += "\n" + osss_label[discr]
 
         at = AnchoredText(var_txt + "\n" + args.ext, loc=2, frameon=False)
         ax.add_artist(at)
@@ -841,9 +1087,14 @@ def main(args):
         scale = ""
         if args.norm:
             scale = "_norm"
-        name = "all"
-        if args.split == "sample":
-            name += "_sample"
+        if args.outdir:
+            # <outdir>/<variable>[__<category>]_<split>[_mconly][_log].<ext>
+            name = {"flavor": "flavour", "sample": "process",
+                    "sample_flav": "process_flavour"}[args.split]
+        else:
+            name = "all"
+            if args.split == "sample":
+                name += "_sample"
         if mc_only:
             name += "_mconly"
 
@@ -870,21 +1121,34 @@ def main(args):
             ax.set_xscale("log")
 
         # Save the plots
-        for filetype in args.save_as.split(","):
-            if filetype not in ["png", "pdf"]:
-                print(
-                    f"Unsupported file type: {filetype}. Only 'png' and 'pdf' are supported."
+        def save(name):
+            stem = (
+                f"{outdir}/{discr}{scale}_{name}"
+                if args.outdir
+                else f"{outdir}/unc_{discr}_inclusive{scale}_{name}"
+            )
+            for filetype in args.save_as.split(","):
+                if filetype not in ["png", "pdf"]:
+                    print(
+                        f"Unsupported file type: {filetype}. Only 'png' and 'pdf' are supported."
+                    )
+                    continue
+                print("creating:", f"{stem}.{filetype}")
+                fig.savefig(
+                    f"{stem}.{filetype}",
+                    bbox_inches="tight",
+                    dpi=200 if filetype == "png" else None,
                 )
-                continue
-            print(
-                "creating:",
-                f"plot/{args.phase}_{args.ext}/unc_{discr}_inclusive{scale}_{name}.{filetype}",
-            )
-            fig.savefig(
-                f"plot/{args.phase}_{args.ext}/unc_{discr}_inclusive{scale}_{name}.{filetype}",
-                bbox_inches="tight",
-                dpi=200 if filetype == "png" else None,
-            )
+
+        save(name)
+        if args.also_log and not args.log:
+            ax.set_yscale("log")
+            ax.set_ylim(bottom=0.1)
+            try:
+                hep.mpl_magic(ax=ax, soft_fail=True)
+            except Exception as e:
+                print(f"Warning: {e}")
+            save(name + "_log")
 
         plt.close(fig)
 

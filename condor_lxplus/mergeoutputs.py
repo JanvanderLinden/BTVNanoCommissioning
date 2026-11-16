@@ -26,6 +26,10 @@ view setup script, sourced only in the hadd subprocess). The merge uses -f102 (f
 recompression, see haddFinal.py: hadd's fast cloning has corrupted jagged branches written by
 uproot) and no -k, so unreadable input files make the merge fail instead of being skipped.
 
+Speed: the coffea files are added in place (no copy of the growing sum per file) and can be
+read by several processes (--hist-workers); the array groups are merged by --jobs parallel
+hadd processes, each with --hadd-threads (hadd -j). On condor: submit_merge.py.
+
 Example
 -------
     python condor_lxplus/mergeoutputs.py /eos/user/v/vanderli/s/btv/outputs/stag_dy_e -j 8
@@ -44,7 +48,8 @@ import sys
 import tempfile
 import time
 from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import fnmatch
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 
 EOS_INSTANCES = (
     ("/eos/user/", "root://eosuser.cern.ch"),
@@ -200,18 +205,61 @@ def count_hists(out):
     return {s: set(v) for s, v in out.items() if isinstance(v, dict)}
 
 
-def merge_hists(files, local_out):
+def _merge_chunk(files, local_out=None, label=""):
+    """Sum of the coffea outputs `files`, added in place into the first one (coffea
+    accumulate with an accumulator: no copy of the growing sum per file). Returns the sum
+    and the (sample, key) entries of the inputs; with local_out, the sum is saved there
+    instead (worker processes) and (local_out, keys) is returned."""
     from coffea.processor import accumulate
     from coffea.util import save
 
     merged, keys = None, defaultdict(set)
-    for i, f in enumerate(sorted(files)):
+    t0 = time.time()
+    for i, f in enumerate(files):
         out = load_coffea(f)
         for s, k in count_hists(out).items():
             keys[s] |= k
-        merged = out if merged is None else accumulate([merged, out])
-        if (i + 1) % 50 == 0:
-            print(f"  hists: {i + 1}/{len(files)} files")
+        merged = out if merged is None else accumulate([out], merged)
+        if (i + 1) % 25 == 0:
+            print(f"  hists{label}: {i + 1}/{len(files)} files ({time.time() - t0:.0f} s)",
+                  flush=True)
+    if local_out is None:
+        return merged, keys
+    save(merged, local_out)
+    return local_out, keys
+
+
+def merge_hists(files, local_out, workers=1, tmpdir=None):
+    """Merge the coffea files into local_out. With workers > 1 the files are split into
+    `workers` chunks, merged in parallel processes (reading and decompressing is the slow
+    part) and the partial sums are added at the end; the memory use grows accordingly."""
+    from coffea.processor import accumulate
+    from coffea.util import save
+
+    files = sorted(files)
+    workers = max(1, min(workers, len(files) // 2 or 1))
+    keys = defaultdict(set)
+    if workers == 1:
+        merged, keys = _merge_chunk(files)
+    else:
+        chunks = [files[i::workers] for i in range(workers)]
+        parts = []
+        with ProcessPoolExecutor(max_workers=workers) as pool:
+            futures = [
+                pool.submit(_merge_chunk, c, os.path.join(tmpdir, f"partial_{i}.coffea"),
+                            f" [{i + 1}/{workers}]")
+                for i, c in enumerate(chunks)
+            ]
+            for fut in futures:
+                path, k = fut.result()
+                parts.append(path)
+                for s, kk in k.items():
+                    keys[s] |= kk
+        merged = None
+        for path in parts:
+            out = load_coffea(path)
+            merged = out if merged is None else accumulate([out], merged)
+            os.remove(path)
     for s, k in keys.items():
         missing = k - set(merged.get(s, {}))
         if missing:
@@ -220,8 +268,12 @@ def merge_hists(files, local_out):
     return len(keys)
 
 
-def hadd_command(target, inputs, root_setup):
-    cmd = ["hadd", "-v", "0", HADD_COMPRESSION, "-f", target] + [xrootd_url(f) for f in inputs]
+def hadd_command(target, inputs, root_setup, threads=1):
+    cmd = ["hadd", "-v", "0", HADD_COMPRESSION]
+    if threads > 1 and len(inputs) > 2 * threads:
+        # hadd's own parallel merging (sub-processes on chunks of the inputs, then one merge)
+        cmd += ["-j", str(threads)]
+    cmd += ["-f", target] + [xrootd_url(f) for f in inputs]
     if shutil.which("hadd"):
         return cmd
     if not root_setup or not os.path.isfile(root_setup):
@@ -244,10 +296,12 @@ def check_merged_root(path, n_inputs):
         raise RuntimeError(f"{path}: TotalEventCount has {n} entries, expected {n_inputs}")
 
 
-def merge_group(group, inputs, tmpdir, root_setup):
+def merge_group(group, inputs, tmpdir, root_setup, threads=1):
     local = os.path.join(tmpdir, "hadd", group + ".root")
     os.makedirs(os.path.dirname(local), exist_ok=True)
-    res = subprocess.run(hadd_command(local, inputs, root_setup), capture_output=True, text=True)
+    res = subprocess.run(hadd_command(local, inputs, root_setup, threads),
+                         capture_output=True, text=True,
+                         cwd=os.path.dirname(local))  # hadd -j writes its chunks to the cwd
     if res.returncode != 0:
         raise RuntimeError(f"hadd {group} failed:\n{(res.stderr or res.stdout).strip()[-2000:]}")
     check_merged_root(local, len(inputs))
@@ -284,6 +338,15 @@ def main():
     parser.add_argument("--name", default=None, help="merged histogram file hists_<name>.coffea "
                         "(default: base name of output_dir)")
     parser.add_argument("-j", "--jobs", type=int, default=4, help="parallel hadd processes")
+    parser.add_argument("--hadd-threads", type=int, default=1,
+                        help="hadd -j N per hadd (for datasets with many files; total load "
+                        "--jobs x N processes)")
+    parser.add_argument("--hist-workers", type=int, default=1,
+                        help="parallel processes reading the coffea files (memory: one "
+                        "partial sum per process)")
+    parser.add_argument("--groups", default=None,
+                        help="merge only the array groups <syst>/<dataset> matching these "
+                        "patterns (split by ',', fnmatch), e.g. 'nominal/TT*'")
     parser.add_argument("--tmpdir", default=None,
                         help="local scratch directory (default: $TMPDIR or /tmp/$USER)")
     parser.add_argument("--root-setup", default=DEFAULT_ROOT_SETUP,
@@ -303,6 +366,11 @@ def main():
     name = args.name or os.path.basename(output_dir)
     all_files = list_files(output_dir)
     hists, arrays, array_dirs = find_inputs(output_dir, all_files)
+    if args.groups:
+        pats = [p for p in args.groups.split(",") if p]
+        arrays = {g: f for g, f in arrays.items() if any(fnmatch.fnmatch(g, p) for p in pats)}
+        if args.delete_inputs:
+            raise SystemExit("--groups and --delete-inputs: delete only after merging all groups")
     print(f"{output_dir}: {len(hists)} histogram files, "
           f"{sum(map(len, arrays.values()))} array files in {len(arrays)} datasets")
     if not hists and not arrays:
@@ -333,7 +401,8 @@ def main():
             else:
                 local = os.path.join(tmpdir, os.path.basename(hist_target))
                 try:
-                    n_samples = merge_hists(list(hists.values()), local)
+                    n_samples = merge_hists(list(hists.values()), local,
+                                            args.hist_workers, tmpdir)
                     copy_to(local, hist_target)
                     manifest["outputs"][hist_target] = sorted(hists.values())
                     print(f"merged {len(hists)} histogram files ({n_samples} samples) -> "
@@ -357,7 +426,8 @@ def main():
                     todo[group] = files
             with ThreadPoolExecutor(max_workers=args.jobs) as pool:
                 futures = {
-                    pool.submit(merge_group, g, f, tmpdir, args.root_setup): g
+                    pool.submit(merge_group, g, f, tmpdir, args.root_setup,
+                                args.hadd_threads): g
                     for g, f in todo.items()
                 }
                 for fut in as_completed(futures):
@@ -374,7 +444,9 @@ def main():
 
         # ---------------------------------------------------------------- manifest
         if manifest["outputs"]:
-            stamp = time.strftime("%Y%m%d_%H%M%S")
+            # unique name: several merges of one output directory can run at the same time
+            # (condor merge jobs for the histograms and the arrays)
+            stamp = f"{time.strftime('%Y%m%d_%H%M%S')}_{args.only or 'all'}_{os.getpid()}"
             local = os.path.join(tmpdir, f"merge_manifest_{stamp}.json")
             with open(local, "w") as f:
                 json.dump(manifest, f, indent=1)

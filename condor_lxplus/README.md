@@ -55,7 +55,22 @@ is complete and reported otherwise (jobs that finished later: rerun with `-f`).
 `--delete-inputs` removes `hists_<n>/` and `arrays_*/` (`eos rm -r`, after a confirmation,
 `-y` to skip it) only when all checks passed; `merge_manifest_<time>.json` lists the inputs of
 each merged file. hadd comes from the environment, else from `--root-setup` (an LCG view
-`setup.sh`, sourced only for hadd). `--only hists|arrays` merges one of the two.
+`setup.sh`, sourced only for hadd). `--only hists|arrays` merges one of the two, `--groups
+<pattern>` only the matching array groups `<syst>/<dataset>`.
+
+Speed: the coffea files are added in place and read by `--hist-workers` processes (memory:
+one partial sum per process); `-j` hadd processes run in parallel, each with
+`--hadd-threads` (hadd `-j`). Merges of several submissions as condor jobs:
+```
+python condor_lxplus/submit_merge.py --jobDir <jobdir>/merge_<tag> --tasks tasks.txt --submit
+```
+with one line `<outputDir> <name> <hists|arrays|all>` per job (or `--task` on the command
+line); `--cpus` (default 4), `--memory` (MB, default 2000 x cpus), `--disk` (default 30GB,
+the merged files are written to the job's scratch first), `--jobFlavour`, `--hadd-threads`,
+`--hist-workers`. The jobs (`merge_job.sh`) unpack the conda-pack tarball of the active
+environment from the sandbox directory (as `submitter.py`) and do not read from AFS or
+delete anything: afterwards run `mergeoutputs.py` interactively (complete merges are
+skipped) and with `--delete-inputs`.
 
 `haddoutputs.py <job_output_dir>` writes the hadd commands for the arrays to a script instead.
 

@@ -412,6 +412,8 @@ def plot_systs(
     hep.histplot(
         stack,
         histtype="fill",
+        edgecolor="black",  # black borders of the stacked histograms
+        linewidth=1,
         stack=True,
         label=labels,
         yerr=False,
