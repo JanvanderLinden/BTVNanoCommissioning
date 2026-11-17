@@ -28,7 +28,9 @@ uproot) and no -k, so unreadable input files make the merge fail instead of bein
 
 Speed: the coffea files are added in place (no copy of the growing sum per file) and can be
 read by several processes (--hist-workers); the array groups are merged by --jobs parallel
-hadd processes, each with --hadd-threads (hadd -j). On condor: submit_merge.py.
+hadd processes, each with --hadd-threads (hadd -j). On condor: submit_merge.py, a cascade of
+jobs that run this script with --items (merge given files into given targets) and
+--finalize (check the targets, write the manifest, remove the intermediate files).
 
 Example
 -------
@@ -155,6 +157,22 @@ def copy_to(local, dest):
 def remove_dir(path):
     if eos_instance(path) and shutil.which("eos"):
         run(["eos", "rm", "-r", path], env=eos_env(path))
+    elif eos_instance(path):
+        # no eos client (batch nodes): files and directories one by one with xrdfs
+        host, rest = xrootd_url(path)[len("root://"):].split("/", 1)
+        top = "/" + rest.lstrip("/")
+        server = f"root://{host}"
+        listing = run(["xrdfs", server, "ls", "-l", "-R", top]).stdout.splitlines()
+        files, dirs = [], []
+        for line in listing:
+            entry = line.split()[-1] if line.strip() else ""
+            if not entry:
+                continue
+            (dirs if line.startswith("d") else files).append(entry)
+        for f in files:
+            run(["xrdfs", server, "rm", f])
+        for d in sorted(dirs, key=len, reverse=True) + [top]:
+            run(["xrdfs", server, "rmdir", d])
     else:
         shutil.rmtree(path)
 
@@ -308,6 +326,96 @@ def merge_group(group, inputs, tmpdir, root_setup, threads=1):
     return local
 
 
+def hadd_to(local, inputs, root_setup, threads=1, expected=None):
+    """hadd inputs -> local, check of the TotalEventCount entries (expected: number of
+    per-job files merged into it, default len(inputs))"""
+    os.makedirs(os.path.dirname(local), exist_ok=True)
+    res = subprocess.run(hadd_command(local, inputs, root_setup, threads),
+                         capture_output=True, text=True, cwd=os.path.dirname(local))
+    if res.returncode != 0:
+        raise RuntimeError(f"hadd -> {local} failed:\n{(res.stderr or res.stdout).strip()[-2000:]}")
+    check_merged_root(local, expected if expected is not None else len(inputs))
+    return local
+
+
+def root_complete(target, expected):
+    try:
+        check_merged_root(target, expected)
+        return True
+    except Exception:
+        return False
+
+
+def remote_exists(path):
+    if not eos_instance(path):
+        return os.path.exists(path)
+    url = xrootd_url(path)
+    host, rest = url[len("root://"):].split("/", 1)
+    return run(["xrdfs", f"root://{host}", "stat", "/" + rest.lstrip("/")], check=False).returncode == 0
+
+
+def run_items(items, args, tmpdir):
+    """Cascade merge step (submit_merge.py): every item {type: coffea|root, target, inputs,
+    entries} merges its inputs into its target. ROOT items run in parallel (--jobs), coffea
+    items one after the other (memory). Targets that exist and are complete (ROOT:
+    TotalEventCount entries) are skipped unless -f, so a retried job continues."""
+    errors = []
+
+    def do_root(i, it):
+        if not args.force and root_complete(it["target"], it["entries"]):
+            return f"exists, complete: {it['target']}"
+        local = os.path.join(tmpdir, "items", f"{i}.root")
+        hadd_to(local, it["inputs"], args.root_setup, args.hadd_threads, it["entries"])
+        copy_to(local, it["target"])
+        os.remove(local)
+        return f"merged {len(it['inputs'])} files -> {it['target']}"
+
+    roots = [(i, it) for i, it in enumerate(items) if it["type"] == "root"]
+    with ThreadPoolExecutor(max_workers=args.jobs) as pool:
+        futures = {pool.submit(do_root, i, it): it for i, it in roots}
+        for fut in as_completed(futures):
+            try:
+                print(fut.result(), flush=True)
+            except Exception as err:
+                errors.append(f"{futures[fut]['target']}: {err}")
+    for i, it in enumerate(items):
+        if it["type"] != "coffea":
+            continue
+        try:
+            local = os.path.join(tmpdir, f"item_{i}.coffea")
+            merge_hists(it["inputs"], local, args.hist_workers, tmpdir)
+            copy_to(local, it["target"])
+            os.remove(local)
+            print(f"merged {len(it['inputs'])} files -> {it['target']}", flush=True)
+        except Exception as err:
+            errors.append(f"{it['target']}: {err}")
+    return errors
+
+
+def finalize(spec, tmpdir):
+    """Last cascade step: check every final target, write the manifest (targets -> per-job
+    inputs, as a merge with this script), remove the intermediate directory."""
+    errors = []
+    for target, entries in spec["checks"].items():
+        if entries is None:
+            if not remote_exists(target):
+                errors.append(f"{target}: missing")
+        elif not root_complete(target, entries):
+            errors.append(f"{target}: missing or incomplete (expected {entries} input files)")
+    if errors:
+        return errors
+    stamp = f"{time.strftime('%Y%m%d_%H%M%S')}_cascade_{os.getpid()}"
+    local = os.path.join(tmpdir, f"merge_manifest_{stamp}.json")
+    with open(local, "w") as f:
+        json.dump({"output_dir": spec["output_dir"], "outputs": spec["outputs"]}, f, indent=1)
+    copy_to(local, f"{spec['output_dir']}/merge_manifest_{stamp}.json")
+    if spec.get("tmp") and remote_exists(spec["tmp"]):
+        remove_dir(spec["tmp"])
+        print(f"removed {spec['tmp']}")
+    print(f"{len(spec['checks'])} merged files complete, manifest written")
+    return []
+
+
 def merged_hist_inputs(output_dir, files):
     """Histogram inputs listed in the merge manifests of output_dir."""
     listed = set()
@@ -334,7 +442,11 @@ def main():
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("output_dir", help="--outputDir of the submission")
+    parser.add_argument("output_dir", nargs="?", help="--outputDir of the submission")
+    parser.add_argument("--items", default=None,
+                        help="cascade merge step: json list of {type, target, inputs, entries}")
+    parser.add_argument("--finalize", default=None,
+                        help="cascade final step: json {output_dir, outputs, checks, tmp}")
     parser.add_argument("--name", default=None, help="merged histogram file hists_<name>.coffea "
                         "(default: base name of output_dir)")
     parser.add_argument("-j", "--jobs", type=int, default=4, help="parallel hadd processes")
@@ -361,6 +473,25 @@ def main():
     parser.add_argument("-y", "--yes", action="store_true",
                         help="do not ask before deleting")
     args = parser.parse_args()
+
+    if args.items or args.finalize:
+        base_tmp = args.tmpdir or os.environ.get("TMPDIR") or f"/tmp/{os.environ.get('USER', 'user')}"
+        os.makedirs(base_tmp, exist_ok=True)
+        tmpdir = tempfile.mkdtemp(prefix="mergeoutputs_", dir=base_tmp)
+        try:
+            with open(args.items or args.finalize) as f:
+                spec = json.load(f)
+            errors = run_items(spec, args, tmpdir) if args.items else finalize(spec, tmpdir)
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+        if errors:
+            print("\nERRORS:")
+            for e in errors:
+                print("  " + e)
+            return 1
+        return 0
+    if not args.output_dir:
+        parser.error("output_dir is required (unless --items / --finalize)")
 
     output_dir = canonical_eos(args.output_dir.rstrip("/"))
     name = args.name or os.path.basename(output_dir)

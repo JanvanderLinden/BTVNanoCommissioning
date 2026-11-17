@@ -1,14 +1,16 @@
 #!/bin/bash -xe
-# Condor job of submit_merge.py: mergeoutputs.py for one output directory, with the conda
-# environment from the sandbox tarball (as execute.sh), nothing read from AFS.
-#   merge_job.sh <outputDir> <name> <only: hists|arrays|all> <jobs> <hadd threads> <hist workers>
+# Condor job (DAG node) of submit_merge.py: one step of the cascade merge, mergeoutputs.py
+# --items <spec> (merge files into targets) or --finalize <spec> (check, manifest, remove the
+# intermediate files), with the conda environment from the sandbox tarball (as execute.sh),
+# nothing read from AFS.
+#   merge_job.sh <items|finalize> <spec.json> <jobs> <hadd threads> <hist workers> <force 0|1>
 
-OUTPUTDIR=$1
-NAME=$2
-ONLY=$3
-JOBS=$4
-HADD_THREADS=$5
-HIST_WORKERS=$6
+MODE=$1
+SPEC=$2
+JOBS=$3
+HADD_THREADS=$4
+HIST_WORKERS=$5
+FORCE=$6
 
 WORKDIR=$(pwd)
 export HOME=$WORKDIR
@@ -36,10 +38,14 @@ export PYTHONDONTWRITEBYTECODE=1
 export X509_USER_PROXY=${X509_USER_PROXY:-$WORKDIR/proxy}
 voms-proxy-info || true
 python -c "import coffea, uproot, fsspec, lz4, cloudpickle" || setup_failed "python modules"
-command -v eos >/dev/null || setup_failed "no eos client on this node"
 command -v xrdcp >/dev/null || setup_failed "no xrdcp on this node"
+[ -f "$WORKDIR/$SPEC" ] || setup_failed "no spec $SPEC"
 
-OPTS=(--name "$NAME" -j "$JOBS" --hadd-threads "$HADD_THREADS" --hist-workers "$HIST_WORKERS"
+OPTS=(-j "$JOBS" --hadd-threads "$HADD_THREADS" --hist-workers "$HIST_WORKERS"
       --tmpdir "$WORKDIR/tmp")
-[ "$ONLY" != "all" ] && OPTS+=(--only "$ONLY")
-python -u $WORKDIR/mergeoutputs.py "$OUTPUTDIR" "${OPTS[@]}"
+[ "$FORCE" = "1" ] && OPTS+=(-f)
+case "$MODE" in
+    items)    python -u $WORKDIR/mergeoutputs.py --items "$WORKDIR/$SPEC" "${OPTS[@]}" ;;
+    finalize) python -u $WORKDIR/mergeoutputs.py --finalize "$WORKDIR/$SPEC" "${OPTS[@]}" ;;
+    *)        setup_failed "unknown mode $MODE" ;;
+esac

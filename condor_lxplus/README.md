@@ -60,17 +60,29 @@ each merged file. hadd comes from the environment, else from `--root-setup` (an 
 
 Speed: the coffea files are added in place and read by `--hist-workers` processes (memory:
 one partial sum per process); `-j` hadd processes run in parallel, each with
-`--hadd-threads` (hadd `-j`). Merges of several submissions as condor jobs:
+`--hadd-threads` (hadd `-j`).
+
+Cascade merge on condor (DAGMan), for one or several submissions:
 ```
 python condor_lxplus/submit_merge.py --jobDir <jobdir>/merge_<tag> --tasks tasks.txt --submit
 ```
-with one line `<outputDir> <name> <hists|arrays|all>` per job (or `--task` on the command
-line); `--cpus` (default 4), `--memory` (MB, default 2000 x cpus), `--disk` (default 30GB,
-the merged files are written to the job's scratch first), `--jobFlavour`, `--hadd-threads`,
-`--hist-workers`. The jobs (`merge_job.sh`) unpack the conda-pack tarball of the active
-environment from the sandbox directory (as `submitter.py`) and do not read from AFS or
-delete anything: afterwards run `mergeoutputs.py` interactively (complete merges are
-skipped) and with `--delete-inputs`.
+with one line `<outputDir> <name> <hists|arrays|all>` per submission (or `--task` on the
+command line). Stage-1 jobs merge `--hist-files-per-job` coffea files (default 20) or up to
+`--root-files-per-job` ROOT files (default 50, at most `--root-items-per-job` outputs per job)
+into `<outputDir>/.merge_tmp/` (or directly into the final file if all inputs fit into one
+job); stage-2 jobs, started when the stage-1 jobs of that output directory are done, merge
+these into `hists_<name>.coffea` and `hadd/<syst>/<dataset>.root`; a final job per output
+directory checks the merged files (TotalEventCount entries = number of per-job files),
+writes the merge manifest and removes `.merge_tmp/`. Each node runs `merge_job.sh`
+(mergeoutputs.py `--items` / `--finalize`) with the conda-pack tarball of the active
+environment from the sandbox directory (as `submitter.py`), reads from EOS with root:// and
+writes with xrdcp; failed nodes are retried twice, completed outputs are skipped on a retry.
+Options: `--cpus` (default 4), `--memory` (MB, default 2000 x cpus), `--disk` (default 20GB),
+`--jobFlavour`, `--hadd-threads`, `--maxJobs` (DAGMan, default 500), `-f` (redo existing
+merges). Progress: `condor_q -batch <jobName>`, `<jobDir>/merge.dag.dagman.out`; after a
+failure `condor_submit_dag merge.dag` in the job directory resubmits the failed nodes (rescue
+DAG). The jobs do not delete per-job files: afterwards run `mergeoutputs.py` interactively
+(complete merges are skipped) and with `--delete-inputs`.
 
 ## Plots on condor
 ```
