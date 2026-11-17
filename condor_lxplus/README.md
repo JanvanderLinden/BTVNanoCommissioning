@@ -72,6 +72,17 @@ environment from the sandbox directory (as `submitter.py`) and do not read from 
 delete anything: afterwards run `mergeoutputs.py` interactively (complete merges are
 skipped) and with `--delete-inputs`.
 
+## Plots on condor
+```
+python scripts/split_coffea.py "<outputDir>/*/hists_*.coffea" -o <eosdir>/plot_split --list vars.txt
+python condor_lxplus/submit_plots.py --phase <workflow> --indir <eosdir>/plot_split --vars vars.txt \
+    --outdir <eos plot dir> --jobDir <jobdir>/plots_<name> --submit -- --lumi <pb> --syst-band
+```
+`split_coffea.py` reads the coffea files once and writes one file per plottable histogram
+(with `sumw`, `sumw_<variation>`), `submit_plots.py` submits one `plotdataMC.py` job per
+histogram (`plot_job.sh`: sandbox tarballs as `submitter.py`, input with xrdcp, plots copied
+to `--outdir` on EOS); plotdataMC.py options after `--`.
+
 `haddoutputs.py <job_output_dir>` writes the hadd commands for the arrays to a script instead.
 
 After normalizing (`condor_lxplus/normalizeArrays.py`, adds a final per-event `weight` branch),
