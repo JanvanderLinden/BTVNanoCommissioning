@@ -61,6 +61,9 @@ _RUN3_2024 = {
     # event selection: minimum PuppiMET pT and W transverse mass (0: no cut)
     "met_pt_min": 0.0,
     "mtw_min": 0.0,
+    # tt1L-s: fill the control histograms for all systematics (False: nominal only, smaller
+    # outputs; then the control plots have no systematic uncertainty band)
+    "control_syst": True,
 }
 # private NanoAODv15 tuples (CustomSummer24 MC, CustomSummer25 data): NoPIDParTAK4 WPs
 _RUN3_2024_NOPID = dict(
@@ -150,6 +153,8 @@ def get_stag_config(campaign: str) -> dict:
     cfg["spanet_model"] = os.environ.get("STAG_SPANET_MODEL", cfg.get("spanet_model"))
     if isinstance(cfg["spanet_model"], str) and "," in cfg["spanet_model"]:
         cfg["spanet_model"] = [f for f in cfg["spanet_model"].split(",") if f]
+    if "STAG_CONTROL_SYST" in os.environ:
+        cfg["control_syst"] = os.environ["STAG_CONTROL_SYST"] == "1"
     if "STAG_SPANET_W_SCORE_CUT" in os.environ:
         cfg["spanet_w_score_cut"] = float(os.environ["STAG_SPANET_W_SCORE_CUT"])
     for key, env in (("btag_bins", "STAG_BTAG_BINS"), ("ctag_bins", "STAG_CTAG_BINS")):

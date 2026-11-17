@@ -30,8 +30,8 @@ Production (histogram workflows):
 
 Output histograms (syst axis first):
   - ``sJet_pt_tagID_flav`` / ``cJet_pt_tagID_flav``: the fit inputs, all systematics
-  - control histograms with an additional sJet flavour-class axis (nominal only unless
-    STAG_CONTROL_SYST=1)
+  - control histograms with an additional sJet flavour-class axis, all systematics
+    (nominal only with control_syst: False in STAG_CONFIG)
   - ``cutflow``, ``sumw`` and ``sumw_<variation>``
 
 Trees (``--isArray``, always on for the spanet_data workflows): one row per event with the
@@ -49,7 +49,7 @@ Environment variables (read when the processor is constructed):
   STAG_CTAG_BINS           tagID bins counting as c tagged, e.g. "2" or "CT,CL"
   STAG_MET_PT_MIN          minimum PuppiMET pT [GeV]
   STAG_MTW_MIN             minimum mT(lepton, PuppiMET) [GeV]
-  STAG_CONTROL_SYST        "1" to fill control histograms for all systematics
+  STAG_CONTROL_SYST        "0": control histograms nominal only (STAG_CONFIG control_syst)
 """
 
 import os
@@ -180,7 +180,7 @@ class NanoProcessor(processor.ProcessorABC):
         self.w_score_cut = self.cfg["spanet_w_score_cut"]
         self.btag_bins = self.cfg["btag_bins"]
         self.ctag_bins = self.cfg["ctag_bins"]
-        self.control_syst = os.environ.get("STAG_CONTROL_SYST", "0") == "1"
+        self.control_syst = bool(self.cfg.get("control_syst", True))
 
         self.lumiMask = load_lumi(self._campaign)
         self.SF_map = load_SF(
@@ -615,7 +615,7 @@ class NanoProcessor(processor.ProcessorABC):
                     weight=w,
                 )
 
-            # control histograms: nominal only unless STAG_CONTROL_SYST=1
+            # control histograms: nominal only with control_syst False (STAG_CONFIG)
             if syst != "nominal" and not self.control_syst:
                 continue
             for hname, (key, axis) in controls.items():

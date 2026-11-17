@@ -24,6 +24,7 @@ from BTVNanoCommissioning.utils.plot_utils import (
     plotratio,
     SFerror,
     MCerrorband,
+    poisson_interval,
     autoranger,
     rebin_hist,
     sample_mergemap,
@@ -39,11 +40,13 @@ def flav_components(h, sel, flav_set, hf_split=False):
     other histograms are split by flav_set, one entry per flav-axis bin."""
     sel = dict(sel)
     if len(h.axes["flav"]) == len(STAG_FLAVOURS):
+        # bottom of the stack first: from the top s, c (cc), b (bb), g, ud, PU
+        groups = [("PU", [7]), ("ud", [5]), ("g", [6])]
         if hf_split:
-            groups = [("b", [0]), ("bb", [1]), ("c", [2]), ("cc", [3])]
+            groups += [("bb", [1]), ("b", [0]), ("cc", [3]), ("c", [2])]
         else:
-            groups = [("b", [0, 1]), ("c", [2, 3])]
-        groups += [("s", [4]), ("ud", [5]), ("g", [6]), ("PU", [7])]
+            groups += [("b", [0, 1]), ("c", [2, 3])]
+        groups += [("s", [4])]
     else:
         groups = [(t, [i]) for i, t in enumerate(flav_set)]
     out = []
@@ -127,6 +130,52 @@ def syst_band(h, sel, nominal, flow, exclude=()):
     return np.sqrt(dn2), np.sqrt(up2), pairs
 
 
+# uncertainty bands: MC stat. filled grey, stat. + syst. hatched black
+STAT_BAND = {"facecolor": "#9494AE", "alpha": 0.45, "lw": 0, "fill": True}
+TOTAL_BAND = {"facecolor": "none", "edgecolor": "black", "hatch": "////", "lw": 0,
+              "fill": True}
+
+
+def _view(h):
+    v = h.view(flow=True)
+    if v.dtype.names and "variance" in v.dtype.names:
+        return np.asarray(v["value"]), np.asarray(v["variance"])
+    return np.asarray(v), np.asarray(v)
+
+
+def bands_and_ratio(ax, rax, hmc, hdata, flow, ms, err_syst=None):
+    """MC stat. band (and stat. + syst. band, err_syst = (down, up)) in the main and the
+    ratio panel, and the Data/MC points with x errors (marker size ms)"""
+    val, var = _view(hmc)
+    nom = _flow_layout(hmc, val, flow)
+    stat = np.sqrt(np.abs(_flow_layout(hmc, var, flow)))
+    edges = plot_edges(hmc, flow)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        safe = np.where(nom != 0, nom, np.nan)
+        ax.stairs(nom + stat, edges=edges, baseline=nom - stat, label="Stat. unc.",
+                  **STAT_BAND)
+        if rax is not None:
+            rax.stairs(1 + stat / safe, edges=edges, baseline=1 - stat / safe, **STAT_BAND)
+        if err_syst is not None:
+            dn, up = np.hypot(err_syst[0], stat), np.hypot(err_syst[1], stat)
+            ax.stairs(nom + up, edges=edges, baseline=nom - dn,
+                      label=r"Stat. $\oplus$ syst. unc.", **TOTAL_BAND)
+            if rax is not None:
+                rax.stairs(1 + up / safe, edges=edges, baseline=1 - dn / safe, **TOTAL_BAND)
+        if rax is None or hdata is None:
+            return
+        rax.axhline(1.0, ls="--", color="black", lw=1, alpha=0.5)
+        dval, dvar = _view(hdata)
+        d = _flow_layout(hdata, dval, flow)
+        dv = _flow_layout(hdata, dvar, flow)
+        r = d / safe
+        err = np.abs(poisson_interval(r, dv / safe**2) - r)
+        centers = 0.5 * (edges[1:] + edges[:-1])
+        half = 0.5 * (edges[1:] - edges[:-1])
+        rax.errorbar(centers, r, xerr=half, yerr=err, color="black", marker="o",
+                     markersize=ms, linestyle="none", lw=1)
+
+
 # W+c: charge combinations of the OS/SS axis (osss = 1: OS, -1: SS)
 OSSS_MODES = {
     "os-ss": ("OSminusSS", "OS-SS"),
@@ -144,6 +193,26 @@ def osss_reduce(h, mode):
     if mode == "os+ss":
         return h[{"osss": sum}]
     return h[{"osss": hist.loc(1)}] + h[{"osss": hist.loc(-1)}] * -1
+
+
+def report_variations(h, sel, nominal, names, discr, threshold=0.2):
+    """relative change of the MC sum per variation; prints the variations changing it by
+    more than `threshold` (broken variations, e.g. a missing weight or a wrong sum of
+    weights of the renormalisation)"""
+    nom = h[{**sel, "syst": nominal}].sum(flow=True)
+    nom = nom.value if hasattr(nom, "value") else float(nom)
+    if not nom:
+        return
+    large = []
+    for n in names:
+        for d in ("Up", "Down"):
+            v = h[{**sel, "syst": f"{n}{d}"}].sum(flow=True)
+            v = v.value if hasattr(v, "value") else float(v)
+            if abs(v / nom - 1) > threshold:
+                large.append(f"{n}{d} {100 * (v / nom - 1):+.0f}%")
+    if large:
+        print(f"WARNING {discr}: variations changing the MC sum by more than "
+              f"{100 * threshold:.0f}%: " + ", ".join(large))
 
 
 def plot_edges(h1d, flow):
@@ -626,6 +695,11 @@ def main(args):
             )
             print("============")
 
+        own_bands = False  # bands and ratio drawn by bands_and_ratio (all but --SF)
+        hdata_plot = None
+        stack_labels = []
+        # data points: same marker in both panels
+        marker_size = plt.rcParams["lines.markersize"] + 1
         if mc_only:
             fig, ax = plt.subplots(figsize=(10, 10))
             rax = None
@@ -642,7 +716,7 @@ def main(args):
         hep.cms.label(
             args.CMS_label,
             data=not mc_only,
-            lumi=args.lumi / 1000.0,
+            lumi=f"{args.lumi / 1000.0:.3g}",  # 3 significant digits
             com=args.com,
             loc=0,
             ax=ax,
@@ -712,9 +786,10 @@ def main(args):
                     label="Data",
                     yerr=True,
                     ax=ax,
-                    xerr=do_xerr,
+                    xerr=True,
+                    marker="o",
+                    markersize=marker_size,
                     flow=args.flow,
-                    sort="y",  # sort by yield
                 )
             hmc = collated["mc"][discr][SF_axis]
             MCerrorband(hmc, ax=ax, flow=args.flow)  # stat. unc. errorband
@@ -791,9 +866,9 @@ def main(args):
                 yerr=True,
                 ax=ax,
                 flow=args.flow,
-                sort="y",  # sort by yield
                 **color_config,
             )
+            stack_labels = list(labels)
             if not mc_only:
                 hep.histplot(
                     collated["data"][discr][noSF_axis],
@@ -802,20 +877,14 @@ def main(args):
                     label="Data",
                     yerr=True,
                     ax=ax,
-                    xerr=do_xerr,
+                    xerr=True,
+                    marker="o",
+                    markersize=marker_size,
                     flow=args.flow,
-                    sort="y",  # sort by yield
                 )
             hmc = collated["mc"][discr][noSF_axis]
-            MCerrorband(hmc, ax=ax, flow=args.flow)  # stat. unc. errorband
-            if not mc_only:
-                rax = plotratio(
-                    collated["data"][discr][noSF_axis],
-                    hmc,
-                    ax=rax,
-                    flow=args.flow,
-                    xerr=do_xerr,
-                )
+            hdata_plot = None if mc_only else collated["data"][discr][noSF_axis]
+            own_bands = True
         elif "flav" in collated["mc"][discr].axes.name and args.split != "sample":
             splitflav_stack, labels, color_config = [], [], {}
             color_config["color"], color_config["alpha"] = [], []
@@ -853,9 +922,9 @@ def main(args):
                 yerr=True,
                 ax=ax,
                 flow=args.flow,
-                sort="y",  # sort by yield
                 **color_config,
             )
+            stack_labels = list(labels)
             if not mc_only:
                 hep.histplot(
                     collated["data"][discr][allaxis],
@@ -864,20 +933,14 @@ def main(args):
                     label="Data",
                     yerr=True,
                     ax=ax,
-                    xerr=do_xerr,
+                    xerr=True,
+                    marker="o",
+                    markersize=marker_size,
                     flow=args.flow,
-                    sort="y",  # sort by yield
                 )
             hmc = collated["mc"][discr][allaxis]
-            MCerrorband(hmc, ax=ax, flow=args.flow)
-            if not mc_only:
-                rax = plotratio(
-                    collated["data"][discr][allaxis],
-                    hmc,
-                    ax=rax,
-                    flow=args.flow,
-                    xerr=do_xerr,
-                )
+            hdata_plot = None if mc_only else collated["data"][discr][allaxis]
+            own_bands = True
         else:
             hmc = collated["mc"][discr][allaxis]
             if "sample" in args.split:
@@ -902,6 +965,7 @@ def main(args):
                     flow=args.flow,
                     sort="y",  # sort by yield
                 )
+                stack_labels = [s for s in collated.keys() if s != "mc" and s != "data"]
             else:
                 hep.histplot(
                     hmc,
@@ -923,22 +987,18 @@ def main(args):
                     label="Data",
                     yerr=True,
                     ax=ax,
-                    xerr=do_xerr,
+                    xerr=True,
+                    marker="o",
+                    markersize=marker_size,
                     flow=args.flow,
-                    sort="y",  # sort by yield
                 )
-            MCerrorband(hmc, ax=ax, flow=args.flow)  # stat. unc. errorband
-            if not mc_only:
-                rax = plotratio(
-                    collated["data"][discr][allaxis],
-                    hmc,
-                    ax=rax,
-                    flow=args.flow,
-                    xerr=do_xerr,
-                )
+            hdata_plot = None if mc_only else collated["data"][discr][allaxis]
+            own_bands = True
 
-        # total uncertainty band: MC stat. + systematic variations of the syst axis
-        if args.syst_band:
+        # uncertainty bands (MC stat.; stat. + syst. with --syst-band: all variations of
+        # the syst axis) and Data/MC points
+        err_syst = None
+        if own_bands and args.syst_band:
             hfull = collated["mc"][discr]
             if "syst" not in hfull.axes.name:
                 print(f"{discr}: no syst axis, only the MC stat. uncertainty is drawn")
@@ -947,22 +1007,13 @@ def main(args):
                 sel = {k: v for k, v in allaxis.items() if k != "syst"}
                 if "flav" in hfull.axes.name:
                     sel["flav"] = sum
-                hnom = hfull[{**sel, "syst": nominal}]
                 err_dn, err_up, used = syst_band(hfull, sel, nominal, args.flow, syst_exclude)
-                nom = _flow_layout(hnom, hnom.view(flow=True)["value"], args.flow)
-                stat = np.sqrt(_flow_layout(hnom, hnom.view(flow=True)["variance"], args.flow))
-                tot_dn, tot_up = np.hypot(err_dn, stat), np.hypot(err_up, stat)
-                edges = plot_edges(hnom, args.flow)
-                band = {"lw": 0, "color": "#9494AE", "alpha": 0.45, "fill": True}
-                ax.stairs(nom + tot_up, edges=edges, baseline=nom - tot_dn,
-                          label=r"Stat. $\oplus$ syst. unc.", **band)
-                if rax is not None:
-                    with np.errstate(divide="ignore", invalid="ignore"):
-                        safe = np.where(nom != 0, nom, np.nan)
-                        rax.stairs(1 + tot_up / safe, edges=edges,
-                                   baseline=1 - tot_dn / safe, **band)
+                err_syst = (err_dn, err_up)
                 print(f"{discr}: syst. band from {len(used)} variations"
                       + (f" ({', '.join(used)})" if used else " (none found)"))
+                report_variations(hfull, sel, nominal, used, discr)
+        if own_bands:
+            bands_and_ratio(ax, rax, hmc, hdata_plot, args.flow, marker_size, err_syst)
 
         xax = ax if rax is None else rax  # axis with the x label and range
         ax.set_xlabel(None)
@@ -1043,10 +1094,18 @@ def main(args):
             ]
             xax.set_xticks(xtickpos, xticklabels)
 
+        # legend: stacked histograms from the top of the stack, then the rest
+        handles, leg_labels = ax.get_legend_handles_labels()
+        top_first = [leg_labels.index(lab) for lab in reversed(stack_labels) if lab in leg_labels]
+        order = top_first + [i for i in range(len(leg_labels)) if i not in top_first]
+        handles = [handles[i] for i in order]
+        leg_labels = [leg_labels[i] for i in order]
         if "sample" in args.split:
-            ax.legend(ncols=2, prop={"size": 16})
+            ax.legend(handles, leg_labels, ncols=2, prop={"size": 16})
         else:
             ax.legend(
+                handles,
+                leg_labels,
                 ncols=(2 if len(flav_set) > 3 else 1),
             )
 
