@@ -24,14 +24,25 @@ Production (histogram workflows):
   - s-tagging bins (tagID 0-7 = BT, BL, CT, CL, L, SL, SM, ST) from the "tagging_bin"
     correction of the WP json
   - SPANet jet-parton assignment (lt.b, htb.b, W.q1/q2) on the 6 leading jets, greedy
-    best-overall assignment; sJet / cJet are the two W daughters (cJet is the c-tagged one)
-  - categories: stag_helpers.TTSL_CATEGORIES
+    best-overall assignment
+  - s-jet candidates (sJet), tag and probe on the W daughters of events with a full
+    assignment (STAG_CONFIG tt1l_sjets "tagprobe", default): in the categories with a
+    c-tagged W daughter every daughter whose partner is c-tagged, in its own tagging bin
+    whatever its own tag (both daughters if both are c-tagged), in the other categories
+    both daughters ("all": both daughters in all categories); cJet = the other daughter
+    of the candidate. Events with two candidates enter all histograms twice, once per
+    candidate.
+  - categories: stag_helpers.TTSL_CATEGORIES (event level)
+  - jet flavour: s-tagging flavour classes (selection.stagflav: b, bb, c, cc, s, ud, g, PU;
+    data: 0), as in the other stag_* workflows
   - event weights from weight_manager (PU, lepton SFs, theory weights, ttbar reweights)
 
-Output histograms (syst axis first):
-  - ``sJet_pt_tagID_flav`` / ``cJet_pt_tagID_flav``: the fit inputs, all systematics
-  - control histograms with an additional sJet flavour-class axis, all systematics
-    (nominal only with control_syst: False in STAG_CONFIG)
+Output histograms (syst axis first, per s-jet candidate):
+  - ``stagtpl_{nSVs,svmass,nConstituents}``: the fit templates as in the other stag_*
+    workflows (histograms/stag.py: flav x s-tag bin x jet pT (PT_EDGES) x <var>), with a
+    category axis (STAG_CONFIG tt1l_template_categories), all systematics
+  - control histograms with the flavour axis of the candidate, all systematics (nominal
+    only with control_syst: False in STAG_CONFIG)
   - ``cutflow``, ``sumw`` and ``sumw_<variation>``
 
 Trees (``--isArray``, always on for the spanet_data workflows): one row per event with the
@@ -66,7 +77,18 @@ from BTVNanoCommissioning.utils.correction import (
     reweighting,
     weight_manager,
 )
-from BTVNanoCommissioning.helpers.func import accumulate_shifts, update, dump_lumi
+from BTVNanoCommissioning.helpers.func import (
+    accumulate_shifts,
+    update,
+    dump_lumi,
+    SV_link_ragged,
+)
+from BTVNanoCommissioning.utils.histogramming.histograms.stag import (
+    PT_EDGES,
+    SV_MASS_EDGES,
+    NCONSTITUENTS_EDGES,
+    stag_flavour_axis,
+)
 from BTVNanoCommissioning.helpers.update_branch import missing_branch
 from BTVNanoCommissioning.utils.array_writer import array_writer
 from BTVNanoCommissioning.utils.selection import (
@@ -78,6 +100,7 @@ from BTVNanoCommissioning.utils.selection import (
     ele_mvatightid,
     ele_promptmvaid,
     jet_veto_lepton_clean,
+    stagflav,
 )
 from BTVNanoCommissioning.helpers.stag_helpers import (
     get_stag_config,
@@ -85,7 +108,6 @@ from BTVNanoCommissioning.helpers.stag_helpers import (
     jet_tagging_bin,
     pad_np,
     custom_flav,
-    flav_class,
     delta_phi,
     p4,
     p4_mass,
@@ -97,7 +119,9 @@ from BTVNanoCommissioning.helpers.stag_helpers import (
     match_targets,
     reconstruct_ttsl,
     MAX_JETS,
+    TAG_BIN_NAMES,
     TTSL_CATEGORIES,
+    TTSL_CTAG_CATEGORIES,
 )
 
 # NanoAODv15 campaigns: prompt-MVA lepton IDs (as in the 2D SF workflows)
@@ -112,8 +136,8 @@ NANOV15_CAMPAIGNS = [
 
 CHANNELS = {"semittM_s": "mu", "semittE_s": "e"}
 
-# jet pT binning of the calibration
-PT_BINS = [
+# jet pT binning of the control histograms (the templates use PT_EDGES of histograms/stag.py)
+CONTROL_PT_BINS = [
     25,
     30,
     35,
@@ -181,6 +205,13 @@ class NanoProcessor(processor.ProcessorABC):
         self.btag_bins = self.cfg["btag_bins"]
         self.ctag_bins = self.cfg["ctag_bins"]
         self.control_syst = bool(self.cfg.get("control_syst", True))
+        self.sjet_mode = self.cfg.get("tt1l_sjets", "tagprobe")
+        self.template_cats = list(
+            self.cfg.get("tt1l_template_categories") or list(TTSL_CATEGORIES)
+        )
+        unknown = set(self.template_cats) - set(TTSL_CATEGORIES)
+        if unknown:
+            raise ValueError(f"tt1l_template_categories: unknown {sorted(unknown)}")
 
         self.lumiMask = load_lumi(self._campaign)
         self.SF_map = load_SF(
@@ -207,9 +238,7 @@ class NanoProcessor(processor.ProcessorABC):
         h = {}
         syst = Hist.axis.StrCategory([], name="syst", growth=True)
         cat = Hist.axis.StrCategory(list(TTSL_CATEGORIES), name="category")
-        jflav = Hist.axis.IntCategory(
-            [0, 1, 3, 4, 5], name="jflav", label="sJet flavour class"
-        )
+        flav = stag_flavour_axis()
 
         h["cutflow"] = Hist.Hist(
             Hist.axis.StrCategory([], name="step", growth=True),
@@ -218,24 +247,36 @@ class NanoProcessor(processor.ProcessorABC):
         if not self.evaluate_spanet:
             return h
 
-        # fit inputs
-        for jet in ("sJet", "cJet"):
-            h[f"{jet}_pt_tagID_flav"] = Hist.Hist(
-                syst,
-                cat,
-                Hist.axis.Variable(
-                    PT_BINS, name=f"{jet}_pt", label=f"$p_T$({jet}) [GeV]"
-                ),
-                Hist.axis.Regular(8, 0, 8, name=f"{jet}_tagID", label=f"tagID({jet})"),
-                Hist.axis.Regular(
-                    11, -5, 6, name=f"{jet}_flav", label=f"flavour({jet})"
-                ),
-                Hist.storage.Weight(),
+        # fit templates of the s-jet candidates, as histograms/stag.py
+        tpl_cat = Hist.axis.StrCategory(self.template_cats, name="category")
+        tagcat = Hist.axis.IntCategory(
+            list(range(len(TAG_BIN_NAMES))),
+            name="tagcat",
+            label="s-tag bin (" + ", ".join(TAG_BIN_NAMES) + ")",
+        )
+        pt = Hist.axis.Variable(PT_EDGES, name="pt", label="Jet $p_{T}$ [GeV]")
+        for var, ax in self.template_axes().items():
+            h[f"stagtpl_{var}"] = Hist.Hist(
+                syst, tpl_cat, flav, tagcat, pt, ax, Hist.storage.Weight()
             )
 
         for hname, (_, axis) in self.control_variables().items():
-            h[hname] = Hist.Hist(syst, cat, jflav, axis, Hist.storage.Weight())
+            h[hname] = Hist.Hist(syst, cat, flav, axis, Hist.storage.Weight())
         return h
+
+    @staticmethod
+    def template_axes():
+        return {
+            "nSVs": Hist.axis.Integer(
+                0, 5, name="nSVs", label="N secondary vertices", overflow=True
+            ),
+            "svmass": Hist.axis.Variable(
+                SV_MASS_EDGES, name="svmass", label="SV mass [GeV]"
+            ),
+            "nConstituents": Hist.axis.Variable(
+                NCONSTITUENTS_EDGES, name="nConstituents", label="N jet constituents"
+            ),
+        }
 
     @staticmethod
     def control_variables():
@@ -259,27 +300,19 @@ class NanoProcessor(processor.ProcessorABC):
             ),
             "sJet_pt": (
                 "sJet_pt",
-                V(PT_BINS, name="sJet_pt", label="$p_T(j_s)$ [GeV]"),
+                V(CONTROL_PT_BINS, name="sJet_pt", label="$p_T(j_s)$ [GeV]"),
             ),
             "sJet_tagID": (
                 "sJet_tagID",
                 R(8, 0, 8, name="sJet_tagID", label="tagID($j_s$)"),
             ),
-            "sJet_flav": (
-                "sJet_flav",
-                R(11, -5, 6, name="sJet_flav", label="flavour($j_s$)"),
-            ),
             "cJet_pt": (
                 "cJet_pt",
-                V(PT_BINS, name="cJet_pt", label="$p_T(j_c)$ [GeV]"),
+                V(CONTROL_PT_BINS, name="cJet_pt", label="$p_T(j_c)$ [GeV]"),
             ),
             "cJet_tagID": (
                 "cJet_tagID",
                 R(8, 0, 8, name="cJet_tagID", label="tagID($j_c$)"),
-            ),
-            "cJet_flav": (
-                "cJet_flav",
-                R(11, -5, 6, name="cJet_flav", label="flavour($j_c$)"),
             ),
             "whad_m": (
                 "whad_m",
@@ -419,7 +452,10 @@ class NanoProcessor(processor.ProcessorABC):
             axis=-1,
         )
         sel_jets = jets[jet_mask]
-        sel_jets = sel_jets[ak.argsort(sel_jets.pt, axis=1, ascending=False)]
+        order = ak.argsort(sel_jets.pt, axis=1, ascending=False)
+        sel_jets = sel_jets[order]
+        # indices of the selected jets in events.Jet (same order), for the SV link
+        sel_idx = ak.local_index(jets.pt, axis=1)[jet_mask][order]
         n_jet = _np(ak.num(sel_jets, axis=1))
 
         # PuppiMET and W transverse mass
@@ -526,6 +562,9 @@ class NanoProcessor(processor.ProcessorABC):
                 ctag_bins=self.ctag_bins,
             )
             v.update({k: val for k, val in recon.items() if not k.startswith("_")})
+            sjets = self.sjet_candidates(
+                ev, events, event_level, jets_ev, sel_idx, jet, recon, isRealData
+            )
 
             # lepton - leptonic b variables
             lp = p4(lep["pt"], lep["eta"], lep["phi"], lep["mass"])
@@ -537,7 +576,6 @@ class NanoProcessor(processor.ProcessorABC):
             v["bl_dR"] = np.sqrt(
                 (bl_eta - lep["eta"]) ** 2 + delta_phi(bl_phi, lep["phi"]) ** 2
             )
-            v["jflav"] = flav_class(v["sJet_flav"]).astype(np.int32)
 
         # ------------------------------------------------------------------ weights
         pruned_ev = ev
@@ -561,7 +599,7 @@ class NanoProcessor(processor.ProcessorABC):
 
         # ------------------------------------------------------------------ output
         if not self.noHist and self.evaluate_spanet:
-            self.fill_histograms(output, v, weights, systematics, shift_name)
+            self.fill_histograms(output, v, sjets, weights, systematics, shift_name)
 
         if self.isArray and shift_name is None:
             branches = self.add_tree_branches(pruned_ev, v, inputs, targets, recon)
@@ -579,23 +617,77 @@ class NanoProcessor(processor.ProcessorABC):
         return {dataset: output}
 
     # ----------------------------------------------------------------------------------
-    def fill_histograms(self, output, v, weights, systematics, shift_name):
+    def sjet_candidates(self, ev, events, event_level, jets_ev, sel_idx, jet, recon, is_data):
+        """s-jet candidates: the two W daughters (q1, q2) of every event, arrays (n, 2) of
+        the candidate's pT, tagging bin, flavour, nSVs, svmass, nConstituents and of its
+        partner (cJet_pt, cJet_tagID, partner_ctag); ok = full SPANet assignment."""
+        n = len(ev)
+        rows = np.arange(n)[:, None]
+        q = np.stack(
+            [recon["spanet_whadq1_jet_idx"], recon["spanet_whadq2_jet_idx"]], axis=1
+        )
+        safe = np.where(q >= 0, q, 0)
+        partner = safe[:, ::-1]
+
+        # per jet (padded to MAX_JETS): flavour class and template variables
+        if is_data or "nBHadrons" not in jets_ev.fields:
+            flav = np.zeros((n, MAX_JETS), dtype=np.int32)
+        else:
+            flav = pad_np(stagflav(jets_ev), MAX_JETS, 7, np.int32)
+        per_jet = {"flav": flav}
+        for var in ("nSVs", "nConstituents"):
+            if var in jets_ev.fields:
+                per_jet[var] = pad_np(jets_ev[var], MAX_JETS, -1, np.int32)
+        if "SV" in events.fields:
+            svmass, _ = SV_link_ragged(events, event_level, sel_idx[event_level][:, :MAX_JETS])
+            svm = pad_np(svmass, MAX_JETS, -1.0, np.float64)
+            if "nSVs" in per_jet:
+                svm = np.where(per_jet["nSVs"] == 0, -1.0, svm)
+            per_jet["svmass"] = svm
+
+        out = {
+            "ok": recon["spanet_has_full_assignment"][:, None] & (q >= 0),
+            "pt": jet["pt"][rows, safe],
+            "tagID": jet["tagID"][rows, safe],
+            "cJet_pt": jet["pt"][rows, partner],
+            "cJet_tagID": jet["tagID"][rows, partner],
+        }
+        out["partner_ctag"] = np.isin(out["cJet_tagID"], self.ctag_bins)
+        for k, arr in per_jet.items():
+            out[k] = arr[rows, safe]
+        return out
+
+    def fill_histograms(self, output, v, sjets, weights, systematics, shift_name):
+        """Fill per s-jet candidate and category: the templates (template categories) and
+        the control histograms (event variables of the candidate's event)."""
         cat_masks = {
             c: np.asarray(f(v), dtype=bool) for c, f in TTSL_CATEGORIES.items()
         }
         controls = self.control_variables()
 
-        # flatten (event, category) pairs so each histogram is filled once per syst
-        pos, labels = [], []
+        # flatten (event, candidate, category) so each histogram is filled once per syst
+        pos, cand, labels = [], [], []
         for cat, m in cat_masks.items():
-            sel = np.nonzero(m)[0]
-            pos.append(sel)
-            labels.append(np.full(len(sel), cat))
+            for k in (0, 1):
+                sel = m & sjets["ok"][:, k]
+                if self.sjet_mode == "tagprobe" and cat in TTSL_CTAG_CATEGORIES:
+                    sel = sel & sjets["partner_ctag"][:, k]
+                idx = np.nonzero(sel)[0]
+                pos.append(idx)
+                cand.append(np.full(len(idx), k))
+                labels.append(np.full(len(idx), cat))
         pos = np.concatenate(pos)
+        cand = np.concatenate(cand)
         labels = np.concatenate(labels)
         if len(pos) == 0:
             return
         vals = {k: np.asarray(val)[pos] for k, val in v.items() if np.ndim(val) == 1}
+        sj = {k: a[pos, cand] for k, a in sjets.items()}
+        # s-jet / partner variables of the candidate (not the single assignment of recon)
+        for k_v, k_s in (("sJet_pt", "pt"), ("sJet_tagID", "tagID"),
+                         ("cJet_pt", "cJet_pt"), ("cJet_tagID", "cJet_tagID")):
+            vals[k_v] = sj[k_s]
+        tpl = np.isin(labels, self.template_cats)
 
         for syst in systematics:
             if shift_name is None and syst != "nominal" and syst in weights.variations:
@@ -603,16 +695,19 @@ class NanoProcessor(processor.ProcessorABC):
             else:
                 w = weights.weight()[pos]
 
-            for jet in ("sJet", "cJet"):
-                output[f"{jet}_pt_tagID_flav"].fill(
+            for var in self.template_axes():
+                if var not in sj or not tpl.any():
+                    continue
+                output[f"stagtpl_{var}"].fill(
                     **{
                         "syst": syst,
-                        "category": labels,
-                        f"{jet}_pt": vals[f"{jet}_pt"],
-                        f"{jet}_tagID": vals[f"{jet}_tagID"],
-                        f"{jet}_flav": vals[f"{jet}_flav"],
+                        "category": labels[tpl],
+                        "flav": sj["flav"][tpl],
+                        "tagcat": sj["tagID"][tpl],
+                        "pt": sj["pt"][tpl],
+                        var: sj[var][tpl],
                     },
-                    weight=w,
+                    weight=w[tpl],
                 )
 
             # control histograms: nominal only with control_syst False (STAG_CONFIG)
@@ -623,7 +718,7 @@ class NanoProcessor(processor.ProcessorABC):
                     **{
                         "syst": syst,
                         "category": labels,
-                        "jflav": vals["jflav"],
+                        "flav": sj["flav"],
                         axis.name: vals[key],
                     },
                     weight=w,

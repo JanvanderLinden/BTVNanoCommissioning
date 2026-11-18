@@ -9,7 +9,8 @@ from BTVNanoCommissioning.helpers.stag_helpers import (
 )
 
 # s-tagging histograms (3D b/c/s cascade, sfs-3d WPs), filled in the stag_* W+c, DY and
-# tt e-mu workflows for the probe jets:
+# tt e-mu workflows for the probe jets (tt l+jets, stag_tt1L_s: the same stagtpl_* binning
+# with an additional category axis, defined in the workflow):
 #   stagtpl_<var>:      SF-fit templates, s-tag bin x jet pT x <var>, <var> = nSVs,
 #                       svmass, nConstituents
 #   stagscore_<axis>:   BvAll (bvall), CvNotB (cvnotb), SvUDG (svudg) exactly as used for

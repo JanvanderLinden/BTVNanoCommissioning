@@ -64,6 +64,14 @@ _RUN3_2024 = {
     # tt1L-s: fill the control histograms for all systematics (False: nominal only, smaller
     # outputs; then the control plots have no systematic uncertainty band)
     "control_syst": True,
+    # tt1L-s s-jet candidates (W daughters), each in its own tagging bin:
+    # "tagprobe" = in the categories with a c-tagged W daughter (TTSL_CTAG_CATEGORIES) a
+    # daughter whose partner is c-tagged, whatever its own tag (both if both are c-tagged;
+    # no self-selection of the probe), in the other categories both daughters;
+    # "all" = both daughters in all categories
+    "tt1l_sjets": "tagprobe",
+    # tt1L-s categories with the stagtpl_* templates (None: all of TTSL_CATEGORIES)
+    "tt1l_template_categories": None,
 }
 # private NanoAODv15 tuples (CustomSummer24 MC, CustomSummer25 data): NoPIDParTAK4 WPs
 _RUN3_2024_NOPID = dict(
@@ -153,6 +161,8 @@ def get_stag_config(campaign: str) -> dict:
     cfg["spanet_model"] = os.environ.get("STAG_SPANET_MODEL", cfg.get("spanet_model"))
     if isinstance(cfg["spanet_model"], str) and "," in cfg["spanet_model"]:
         cfg["spanet_model"] = [f for f in cfg["spanet_model"].split(",") if f]
+    if cfg.get("tt1l_sjets", "tagprobe") not in ("all", "tagprobe"):
+        raise ValueError(f"tt1l_sjets must be 'all' or 'tagprobe', not {cfg['tt1l_sjets']}")
     if "STAG_CONTROL_SYST" in os.environ:
         cfg["control_syst"] = os.environ["STAG_CONTROL_SYST"] == "1"
     if "STAG_SPANET_W_SCORE_CUT" in os.environ:
@@ -967,4 +977,11 @@ TTSL_CATEGORIES = {
     "wdet_2b1c_ttsl": lambda v: v["bb_tagged"]
     & _c(v)
     & (v["spanet_w_detection_prob"] > 0.5),
+}
+# categories requiring a c-tagged W daughter (tt1l_sjets: "tagprobe")
+TTSL_CTAG_CATEGORIES = {
+    "incl_1bh1c_ttsl",
+    "incl_2b1c_ttsl",
+    "wdet_1bh1c_ttsl",
+    "wdet_2b1c_ttsl",
 }
