@@ -2,6 +2,7 @@ import numpy as np
 
 np.finfo(np.dtype("float32"))
 np.finfo(np.dtype("float64"))
+import copy
 import fnmatch
 import argparse, os, glob, sys
 import matplotlib.pyplot as plt
@@ -106,14 +107,25 @@ def complete_syst_slices(output, is_mc=lambda sample: "Run" not in sample):
                 continue
             iax = h.axes.name.index("syst")
             sax = h.axes["syst"]
-            new_ax = hist.axis.StrCategory(labels, name=sax.name, label=sax.label,
-                                           growth=sax.traits.growth)
+            order = have + [lab for lab in labels if lab not in have]
+            try:
+                new_ax = hist.axis.StrCategory(order, growth=sax.traits.growth,
+                                               flow=sax.traits.overflow)
+            except TypeError:  # older hist
+                new_ax = hist.axis.StrCategory(order, growth=sax.traits.growth,
+                                               overflow=sax.traits.overflow)
+            # the same metadata (name, label, ...) as the original axis: histograms are
+            # only added (collate) if their axes have equal metadata ("axes not mergable")
+            new_ax.__dict__.clear()
+            new_ax.__dict__.update(copy.deepcopy(sax.__dict__))
+            if new_ax.traits != sax.traits or new_ax.__dict__ != sax.__dict__:
+                raise RuntimeError(f"{s} {key}: could not rebuild the syst axis")
             axes = list(h.axes)
             axes[iax] = new_ax
             hn = hist.Hist(*axes, storage=h.storage_type())
             old, new = h.view(flow=True), hn.view(flow=True)
             pre = (slice(None),) * iax
-            for j, lab in enumerate(labels):
+            for j, lab in enumerate(order):
                 src = have.index(lab if lab in have else "nominal")
                 new[pre + (j,)] = old[pre + (src,)]
             output[s][key] = hn
