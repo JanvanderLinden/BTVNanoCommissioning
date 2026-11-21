@@ -1,7 +1,9 @@
 #!/usr/bin/env python
 """
 Condor jobs for scripts/plotdataMC.py: one job per histogram (the per-histogram files of
-scripts/split_coffea.py), all jobs of one call in one batch (JobBatchName).
+scripts/split_coffea.py, or of mergeoutputs.py --split-hists: <outputDir>/hists/, several
+input directories, e.g. MC, minor_MC and data, split by ','), all jobs of one call in one
+batch (JobBatchName).
 
 The jobs use the conda-pack environment and code tarballs of the sandbox directory on EOS
 (as submitter.py; built once per environment / code version), read their input file with
@@ -38,7 +40,8 @@ def main():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--phase", required=True, help="plotdataMC.py -p (workflow name)")
-    p.add_argument("--indir", required=True, help="EOS directory of <variable>.coffea")
+    p.add_argument("--indir", required=True,
+                   help="EOS directory (directories, split by ',') of <variable>.coffea")
     p.add_argument("--vars", required=True, help="file with one variable per line")
     p.add_argument("--outdir", required=True, help="EOS directory of the plots")
     p.add_argument("--jobDir", required=True, help="job directory (configs, logs; on AFS)")
@@ -69,7 +72,8 @@ def main():
     prefix = os.environ.get("CONDA_PREFIX")
     if not prefix:
         raise SystemExit("activate the BTVNanoCommissioning environment (setup_env.sh) first")
-    in_url, out_url = eos_url(args.indir), eos_url(args.outdir)
+    in_urls = [eos_url(d) for d in args.indir.split(",") if d]
+    out_url = eos_url(args.outdir)
 
     job_dir = os.path.abspath(args.jobDir)
     if os.path.exists(job_dir):
@@ -85,6 +89,8 @@ def main():
         f.write("\n".join(opts) + ("\n" if opts else ""))
     with open(os.path.join(job_dir, "vars.txt"), "w") as f:
         f.write("\n".join(variables) + "\n")
+    with open(os.path.join(job_dir, "indirs.txt"), "w") as f:
+        f.write("\n".join(in_urls) + "\n")
 
     sandbox = eos_url(args.sandboxDir)
     env_url = env_tarball(prefix, sandbox)
@@ -96,7 +102,7 @@ def main():
     accounting = f'+AccountingGroup = "{args.accountingGroup}"' if args.accountingGroup else ""
     jdl = f"""Universe   = vanilla
 Executable = {job_dir}/plot_job.sh
-Arguments  = $(var) {args.phase} {in_url} {out_url}
+Arguments  = $(var) {args.phase} indirs.txt {out_url}
 
 request_cpus   = 1
 request_memory = {args.memory}
@@ -112,7 +118,7 @@ Error  = {job_dir}/err/job.err_$(Cluster)-$(var)
 
 should_transfer_files   = YES
 when_to_transfer_output = ON_EXIT
-transfer_input_files    = {env_url},{code_url},{job_dir}/plotdataMC.py,{job_dir}/plot_opts.txt
+transfer_input_files    = {env_url},{code_url},{job_dir}/plotdataMC.py,{job_dir}/plot_opts.txt,{job_dir}/indirs.txt
 x509userproxy           = {job_dir}/proxy
 on_exit_remove      = (ExitBySignal == False) && (ExitCode == 0)
 on_exit_hold        = (ExitBySignal == False) && (ExitCode == 99)

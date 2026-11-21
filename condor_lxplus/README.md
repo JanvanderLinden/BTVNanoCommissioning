@@ -16,7 +16,8 @@ was run. The jobs do not use AFS:
 - The split sample json goes to `<outputDir>/.condor_sandbox/split_samples.json`; only
   `arguments.json` (and the executable and the proxy) come from the job directory.
 - `max_materialize = --maxRunning` (default 200) limits the jobs of a submission in the
-  queue at a time; the others are added as these finish. `request_disk = --disk` (10GB).
+  queue at a time; the others are added as these finish. `request_disk = --disk` (10GB),
+  `request_memory = --memory` (MB; not set by default: the lxplus default, 2000 MB per CPU).
 - `--noSandbox` runs the jobs from the checkout and environment directly (the old way):
   only for a few jobs. Hundreds of jobs reading a conda environment on AFS overload the AFS
   server (CERN batch storage guidelines, KB0003076).
@@ -43,7 +44,12 @@ python condor_lxplus/mergeoutputs.py <outputDir> -j 8 --delete-inputs   # + remo
 ```
 merges the per-job outputs of one submission:
 - `hists_<n>/hists_<n>.coffea` -> `<outputDir>/hists_<name>.coffea` (`<name>`: base name of
-  `<outputDir>`, `--name`), the input of `scripts/plotdataMC.py`;
+  `<outputDir>`, `--name`), the input of `scripts/plotdataMC.py`; with `--split-hists` one
+  file per histogram instead, `<outputDir>/hists/<histogram>.coffea` (`{dataset: {histogram,
+  sumw, sumw_<variation>}}`), `_other.coffea` (all other entries) and `index.json`
+  (histograms with axes and datasets): merged in chunks of `--hist-files-per-chunk` files
+  (default 20), each written per histogram to the scratch directory, then each histogram on
+  its own, so that the memory is that of one chunk or of the largest merged histogram;
 - `arrays_*/<syst>/<dataset>/*.root` -> `<outputDir>/hadd/<syst>/<dataset>.root` (hadd with
   `-f102`, see `haddFinal.py`), the input of `checkHadd.py` and `normalizeArrays.py`.
 
@@ -59,7 +65,7 @@ each merged file. hadd comes from the environment, else from `--root-setup` (an 
 <pattern>` only the matching array groups `<syst>/<dataset>`.
 
 Speed: the coffea files are added in place and read by `--hist-workers` processes (memory:
-one partial sum per process); `-j` hadd processes run in parallel, each with
+one partial sum, `--split-hists`: one chunk or histogram, per process); `-j` hadd processes run in parallel, each with
 `--hadd-threads` (hadd `-j`).
 
 Cascade merge on condor (DAGMan), for one or several submissions:
@@ -73,7 +79,11 @@ into `<outputDir>/.merge_tmp/` (or directly into the final file if all inputs fi
 job); stage-2 jobs, started when the stage-1 jobs of that output directory are done, merge
 these into `hists_<name>.coffea` and `hadd/<syst>/<dataset>.root`; a final job per output
 directory checks the merged files (TotalEventCount entries = number of per-job files),
-writes the merge manifest and removes `.merge_tmp/`. Each node runs `merge_job.sh`
+writes the merge manifest and removes `.merge_tmp/`. `--split-hists`: the stage-1 jobs write
+their chunk as one file per histogram, `--key-groups` stage-2 jobs per output directory
+(default 16) merge the histograms of their group one by one into `hists/`, the final job
+checks them against the histogram lists of the stage-1 jobs and writes `hists/index.json`;
+no job holds more than one chunk or one merged histogram (`--memory`: for the largest). Each node runs `merge_job.sh`
 (mergeoutputs.py `--items` / `--finalize`) with the conda-pack tarball of the active
 environment from the sandbox directory (as `submitter.py`), reads from EOS with root:// and
 writes with xrdcp; failed nodes are retried twice, completed outputs are skipped on a retry.
@@ -85,6 +95,14 @@ DAG). The jobs do not delete per-job files: afterwards run `mergeoutputs.py` int
 (complete merges are skipped) and with `--delete-inputs`.
 
 ## Plots on condor
+Per-histogram merges (`--split-hists`): the plottable histograms from `index.json`, the jobs
+read `<variable>.coffea` of every `--indir` that has it:
+```
+python scripts/split_coffea.py --from-index <outputDir1>/hists,<outputDir2>/hists --list vars.txt
+python condor_lxplus/submit_plots.py --phase <workflow> --indir <outputDir1>/hists,<outputDir2>/hists \
+    --vars vars.txt --outdir <eosdir>/plots --jobDir <jobdir>/plots --submit -- <plotdataMC.py options>
+```
+Single merged files: split them once into one file per histogram first:
 ```
 python scripts/split_coffea.py "<outputDir>/*/hists_*.coffea" -o <eosdir>/plot_split --list vars.txt
 python condor_lxplus/submit_plots.py --phase <workflow> --indir <eosdir>/plot_split --vars vars.txt \

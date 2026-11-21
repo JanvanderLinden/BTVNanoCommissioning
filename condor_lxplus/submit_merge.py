@@ -13,6 +13,12 @@ long mergeoutputs.py run per output directory:
            entries = number of per-job files), writes the merge manifest and removes
            .merge_tmp
 
+--split-hists: one file per histogram (<outputDir>/hists/<histogram>.coffea, index.json, see
+mergeoutputs.py) instead of hists_<name>.coffea: the stage-1 jobs write their chunk as one
+file per histogram, --key-groups stage-2 jobs merge the histograms (each job the histograms
+of its group, one after the other), the final job checks them and writes hists/index.json.
+No job holds more than one chunk or one merged histogram in memory.
+
 The final files and the manifest are those of mergeoutputs.py, so a later interactive
 mergeoutputs.py (or E_merge_stag.sh) run finds them complete and, with --delete-inputs,
 removes the per-job files. Nothing per-job is deleted by the jobs. Files that are already
@@ -36,6 +42,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -58,7 +65,37 @@ def plan_task(output_dir, name, only, args):
     spec = {"output_dir": output_dir, "outputs": {}, "checks": {}, "tmp": tmp}
     skipped = 0
 
-    if hists and only in ("all", "hists"):
+    if hists and only in ("all", "hists") and args.split_hists:
+        hdir = f"{output_dir}/{mo.HIST_DIR}"
+        inputs = sorted(hists.values())
+        done = (f"{hdir}/{mo.INDEX}" in existing
+                and not (set(inputs) - mo.merged_hist_inputs(output_dir, files)))
+        if done and not args.force:
+            skipped += 1
+        else:
+            m = args.hist_files_per_job
+            # unique per submission: leftovers of an earlier, failed cascade are not reused
+            stamp = time.strftime("%Y%m%d_%H%M%S")
+            if len(inputs) <= m:
+                s1.append({"type": "coffea_split", "target": hdir, "inputs": inputs,
+                           "entries": None})
+                spec["split"] = {"hists_dir": hdir, "parts": None}
+            else:
+                parts = []
+                for i, c in enumerate(chunks(inputs, m)):
+                    part = f"{tmp}/hparts_{stamp}/part{i}"
+                    s1.append({"type": "coffea_parts", "target": part, "inputs": c,
+                               "entries": None})
+                    parts.append(part)
+                meta = f"{tmp}/hmeta_{stamp}"
+                for g in range(args.key_groups):
+                    s2.append({"type": "coffea_keys", "target": hdir, "parts": parts,
+                               "group": g, "ngroups": args.key_groups, "meta": meta,
+                               "entries": None})
+                spec["split"] = {"hists_dir": hdir, "parts": parts, "meta": meta}
+            spec["outputs"][hdir] = inputs
+
+    elif hists and only in ("all", "hists"):
         target = f"{output_dir}/hists_{name}.coffea"
         inputs = sorted(hists.values())
         done = target in existing and not (set(inputs) - mo.merged_hist_inputs(output_dir, files))
@@ -106,7 +143,7 @@ def pack(items, max_files, max_items):
     max_items items per job"""
     jobs, cur, n = [], [], 0
     for it in items:
-        if it["type"] == "coffea":
+        if it["type"] != "root":
             jobs.append([it])
             continue
         k = len(it["inputs"])
@@ -133,6 +170,12 @@ def main():
                             "testmatch", "nextweek"])
     p.add_argument("--hist-files-per-job", type=int, default=20,
                    help="coffea files merged per stage-1 job (default: 20)")
+    p.add_argument("--split-hists", action="store_true",
+                   help="one file per histogram (hists/<histogram>.coffea) instead of "
+                   "hists_<name>.coffea")
+    p.add_argument("--key-groups", type=int, default=16,
+                   help="--split-hists: stage-2 jobs per output directory, each merging "
+                   "the histograms of its group (default: 16)")
     p.add_argument("--root-files-per-job", type=int, default=50,
                    help="ROOT files merged per stage-1 job (default: 50)")
     p.add_argument("--root-items-per-job", type=int, default=10,
@@ -175,7 +218,7 @@ def main():
         s1, s2, spec, skipped, n_h, n_a = plan_task(outdir, name, only, args)
         print(f"{outdir}: {n_h} coffea + {n_a} ROOT files, {skipped} merged files exist; "
               f"{len(s1)} stage-1 and {len(s2)} stage-2 merges")
-        if not spec["checks"]:
+        if not spec["checks"] and not spec.get("split"):
             continue
         pk1 = pack(s1, args.root_files_per_job, args.root_items_per_job)
         n1 = [f"t{k}_s1_{i}" for i in range(len(pk1))]

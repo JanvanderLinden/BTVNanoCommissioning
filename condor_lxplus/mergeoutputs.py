@@ -10,6 +10,17 @@ files, so that the per-job files can be removed from EOS:
 haddoutputs.py, so checkHadd.py, normalizeArrays.py (input <outputDir>/hadd) and haddFinal.py
 work on the result as before.
 
+--split-hists: one file per histogram instead of hists_<name>.coffea, so that no step has to
+hold all histograms in memory:
+
+    <outputDir>/hists/<histogram>.coffea   {dataset: {<histogram>: hist, sumw, sumw_<v>}}
+    <outputDir>/hists/_other.coffea        {dataset: {all entries that are not histograms}}
+    <outputDir>/hists/index.json           {"keys": {<histogram>: {file, axes, datasets}}}
+
+The coffea files are merged in chunks of --hist-files-per-chunk files (each chunk written as
+one file per histogram to the scratch directory), then every histogram on its own: the
+memory use is that of one chunk or of one merged histogram, whichever is larger.
+
 EOS handling (lxplus storage guidance):
 - the files are listed once on the EOS server (`eos find`), not by globbing the /eos mount;
 - inputs are read as root:// URLs;
@@ -17,7 +28,7 @@ EOS handling (lxplus storage guidance):
   with xrdcp; the per-job inputs are removed only with --delete-inputs, after every merged
   file was checked, with `eos rm -r` (server side).
 
-Checks: the merged coffea file holds every histogram of every input file; every merged ROOT
+Checks: the merged coffea file(s) hold every histogram of every input file; every merged ROOT
 file has as many TotalEventCount entries as it has input files (one per input file, see
 array_writer.py). Nothing is copied or deleted if a check fails.
 
@@ -49,6 +60,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import zlib
 from collections import defaultdict
 import fnmatch
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
@@ -177,6 +189,43 @@ def remove_dir(path):
         shutil.rmtree(path)
 
 
+def remote_rm(paths, workers=8):
+    """Remove files (xrdfs rm on EOS: no eos client on the batch nodes)."""
+    def rm(path):
+        if eos_instance(path):
+            host, rest = xrootd_url(path)[len("root://"):].split("/", 1)
+            run(["xrdfs", f"root://{host}", "rm", "/" + rest.lstrip("/")], check=False)
+        elif os.path.exists(path):
+            os.remove(path)
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        list(pool.map(rm, paths))
+
+
+def copy_many(pairs, workers=8):
+    """copy_to for [(local, dest)] in parallel threads"""
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        list(pool.map(lambda lp: copy_to(*lp), pairs))
+
+
+def read_json(path):
+    if eos_instance(path):
+        import fsspec
+
+        with fsspec.open(xrootd_url(path), "r") as fin:
+            return json.load(fin)
+    with open(path) as fin:
+        return json.load(fin)
+
+
+def write_json(obj, dest, tmpdir):
+    local = os.path.join(tmpdir, f"json_{os.getpid()}_{time.time_ns()}.json")
+    with open(local, "w") as f:
+        json.dump(obj, f, indent=1)
+    copy_to(local, dest)
+    os.remove(local)
+
+
 # ------------------------------------------------------------------------------------------
 # inputs
 # ------------------------------------------------------------------------------------------
@@ -248,11 +297,20 @@ def _merge_chunk(files, local_out=None, label=""):
 
 
 def merge_hists(files, local_out, workers=1, tmpdir=None):
-    """Merge the coffea files into local_out. With workers > 1 the files are split into
-    `workers` chunks, merged in parallel processes (reading and decompressing is the slow
-    part) and the partial sums are added at the end; the memory use grows accordingly."""
-    from coffea.processor import accumulate
+    """Merge the coffea files into local_out (one file). Returns the number of samples."""
     from coffea.util import save
+
+    merged, keys = merge_in_memory(files, workers, tmpdir)
+    save(merged, local_out)
+    return len(keys)
+
+
+def merge_in_memory(files, workers=1, tmpdir=None):
+    """Sum of the coffea files and the (sample, key) entries of the inputs. With workers > 1
+    the files are split into `workers` chunks, merged in parallel processes (reading and
+    decompressing is the slow part) and the partial sums are added at the end; the memory
+    use grows accordingly."""
+    from coffea.processor import accumulate
 
     files = sorted(files)
     workers = max(1, min(workers, len(files) // 2 or 1))
@@ -282,8 +340,205 @@ def merge_hists(files, local_out, workers=1, tmpdir=None):
         missing = k - set(merged.get(s, {}))
         if missing:
             raise RuntimeError(f"merged histograms of {s} miss {sorted(missing)[:5]}...")
+    return merged, keys
+
+
+# ------------------------------------------------------------------------------------------
+# one file per histogram (--split-hists)
+# ------------------------------------------------------------------------------------------
+
+HIST_DIR = "hists"
+OTHER = "_other"
+INDEX = "index.json"
+
+
+def key_file(key):
+    """file name of a histogram key"""
+    return key.replace("/", "__") + ".coffea"
+
+
+def key_group(key, ngroups):
+    """stage-2 job of a key (stable over processes, unlike hash())"""
+    return zlib.crc32(key.encode()) % ngroups
+
+
+def split_output(out):
+    """{key: {dataset: {key: hist, sumw, sumw_<v>}}} of the histograms and
+    {dataset: {other entries}} of everything else (sums of weights, lumi lists, ...), and
+    the sums of weights {dataset: {sumw, sumw_<v>}} (numbers). The sums in the histogram
+    files are replaced by the totals over all parts when the parts are merged
+    (merge_key_files): a part without a histogram of a dataset still counts for its sums."""
+    import hist
+
+    per_key, other, sums = defaultdict(dict), {}, {}
+    for ds, d in out.items():
+        if not isinstance(d, dict):
+            other[ds] = d
+            continue
+        sums[ds] = {k: v for k, v in d.items()
+                    if isinstance(k, str) and (k == "sumw" or k.startswith("sumw_"))}
+        for k, v in d.items():
+            if isinstance(v, hist.Hist):
+                if key_file(k) == key_file(OTHER):
+                    raise RuntimeError(f"histogram name {k} is reserved")
+                per_key[k][ds] = dict(sums[ds], **{k: v})
+            else:
+                other.setdefault(ds, {})[k] = v
+    return per_key, other, sums
+
+
+def _number(v):
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def total_sums(infos):
+    """{dataset: {sumw, sumw_<v>}} summed over the key lists of all parts"""
+    tot = defaultdict(dict)
+    for info in infos:
+        for ds, sw in info.get("sums", {}).items():
+            for k, v in sw.items():
+                tot[ds][k] = tot[ds].get(k, 0.0) + v
+    return tot
+
+
+def hist_datasets(d, key):
+    """datasets of a per-histogram output that have the histogram"""
+    return sorted(ds for ds, x in d.items() if isinstance(x, dict) and key in x)
+
+
+def save_split(merged, local_dir):
+    """Write `merged` as one file per histogram (+ _other) into local_dir. Returns the key
+    list {"hists": {key: [datasets]}, "other": {dataset: [keys]}, "files": {key: file}}."""
+    from coffea.util import save
+
+    os.makedirs(local_dir, exist_ok=True)
+    per_key, other, sums = split_output(merged)
+    info = {"hists": {}, "other": {}, "files": {}, "axes": {}, "sums": {}}
+    for ds, sw in sums.items():
+        num = {k: _number(v) for k, v in sw.items()}
+        info["sums"][ds] = {k: v for k, v in num.items() if v is not None}
+    for k, d in per_key.items():
+        save(d, os.path.join(local_dir, key_file(k)))
+        info["hists"][k] = hist_datasets(d, k)
+        info["files"][k] = key_file(k)
+        info["axes"][k] = list(d[info["hists"][k][0]][k].axes.name)
+    save(other, os.path.join(local_dir, key_file(OTHER)))
+    info["files"][OTHER] = key_file(OTHER)
+    info["other"] = {ds: sorted(map(str, d)) if isinstance(d, dict) else []
+                     for ds, d in other.items()}
+    return info
+
+
+def merge_key_files(key, paths, local_out, sums=None):
+    """Sum of the files of one histogram key -> local_out, with the sums of weights of the
+    datasets set to `sums` (totals over all parts). Returns {axes, datasets}."""
+    import hist
+    from coffea.processor import accumulate
+    from coffea.util import save
+
+    merged = None
+    for p in paths:
+        out = load_coffea(p)
+        merged = out if merged is None else accumulate([out], merged)
+    if key != OTHER:
+        for ds, d in merged.items():
+            if isinstance(d, dict) and ds in (sums or {}):
+                d.update(sums[ds])
     save(merged, local_out)
-    return len(keys)
+    if key == OTHER:
+        return {"axes": None, "datasets": sorted(merged)}
+    dss = hist_datasets(merged, key)
+    axes = list(merged[dss[0]][key].axes.name) if dss else None
+    if axes is None or not isinstance(merged[dss[0]][key], hist.Hist):
+        raise RuntimeError(f"{local_out}: no histogram {key}")
+    return {"axes": axes, "datasets": dss}
+
+
+def _chunk_to_parts(files, part_dir):
+    """worker: merge a chunk of coffea files, write it per histogram into part_dir"""
+    merged, keys = merge_in_memory(files)
+    info = save_split(merged, part_dir)
+    info["inputs"] = {s: sorted(map(str, k)) for s, k in keys.items()}
+    return info
+
+
+def _merge_key(key, paths, local_out, sums):
+    return key, merge_key_files(key, paths, local_out, sums)
+
+
+def check_split(input_keys, index):
+    """every (dataset, key) entry of the inputs is in the per-histogram files"""
+    have = defaultdict(set)
+    for k, meta in index["keys"].items():
+        for ds in meta["datasets"]:
+            have[ds].add(k)
+    for ds, keys in index.get("other", {}).items():
+        have[ds] |= set(keys)
+    for ds, keys in input_keys.items():
+        missing = set(keys) - have[ds]
+        if missing:
+            raise RuntimeError(f"merged histograms of {ds} miss {sorted(missing)[:5]}...")
+
+
+def merge_hists_split(files, local_dir, chunk_files=20, workers=1, tmpdir=None):
+    """Merge the coffea files into one file per histogram in local_dir (+ index.json):
+    chunks of chunk_files files, each written per histogram to the scratch directory
+    (`workers` chunks in parallel), then each histogram from its chunk files. Memory: one
+    chunk or one merged histogram per worker."""
+    files = sorted(files)
+    chunks = [files[i : i + chunk_files] for i in range(0, len(files), chunk_files)]
+    parts_dir = os.path.join(tmpdir, "split_parts")
+    infos = []
+    workers = max(1, min(workers, len(chunks)))
+    with ProcessPoolExecutor(max_workers=workers) as pool:
+        futs = [pool.submit(_chunk_to_parts, c, os.path.join(parts_dir, f"part{i}"))
+                for i, c in enumerate(chunks)]
+        for i, fut in enumerate(futs):
+            infos.append((os.path.join(parts_dir, f"part{i}"), fut.result()))
+            print(f"  hists: chunk {i + 1}/{len(chunks)} done", flush=True)
+    index, input_keys = merge_parts(infos, local_dir, workers)
+    check_split(input_keys, index)
+    shutil.rmtree(parts_dir, ignore_errors=True)
+    with open(os.path.join(local_dir, INDEX), "w") as f:
+        json.dump(index, f, indent=1)
+    return index
+
+
+def merge_parts(infos, local_dir, workers=1, keep_parts=False):
+    """per histogram key: merge the files of the parts [(part dir, key list)] into
+    local_dir/<key file>; returns (index, input keys)"""
+    os.makedirs(local_dir, exist_ok=True)
+    keys = sorted({k for _, info in infos for k in info["files"] if k != OTHER})
+    input_keys = defaultdict(set)
+    other = defaultdict(set)
+    for _, info in infos:
+        for ds, k in info.get("inputs", {}).items():
+            input_keys[ds] |= set(k)
+        for ds, k in info["other"].items():
+            other[ds] |= set(k)
+    todo = [(k, [os.path.join(d, info["files"][k]) for d, info in infos if k in info["files"]])
+            for k in keys]
+    todo.append((OTHER, [os.path.join(d, info["files"][OTHER]) for d, info in infos]))
+    index = {"keys": {}, "other": {ds: sorted(k) for ds, k in other.items()},
+             "other_file": key_file(OTHER)}
+    sums = total_sums([info for _, info in infos])
+    with ProcessPoolExecutor(max_workers=max(1, workers)) as pool:
+        futs = [pool.submit(_merge_key, k, paths, os.path.join(local_dir, key_file(k)),
+                            {ds: sums[ds] for ds in sums})
+                for k, paths in todo]
+        for fut in as_completed(futs):
+            k, meta = fut.result()
+            if k != OTHER:
+                index["keys"][k] = dict(meta, file=key_file(k))
+    if not keep_parts:
+        for _, paths in todo:
+            for p in paths:
+                if os.path.exists(p):
+                    os.remove(p)
+    return index, {ds: sorted(k) for ds, k in input_keys.items()}
 
 
 def hadd_command(target, inputs, root_setup, threads=1):
@@ -379,23 +634,94 @@ def run_items(items, args, tmpdir):
             except Exception as err:
                 errors.append(f"{futures[fut]['target']}: {err}")
     for i, it in enumerate(items):
-        if it["type"] != "coffea":
+        if it["type"] == "root":
             continue
         try:
-            local = os.path.join(tmpdir, f"item_{i}.coffea")
-            merge_hists(it["inputs"], local, args.hist_workers, tmpdir)
-            copy_to(local, it["target"])
-            os.remove(local)
-            print(f"merged {len(it['inputs'])} files -> {it['target']}", flush=True)
+            if it["type"] == "coffea":
+                local = os.path.join(tmpdir, f"item_{i}.coffea")
+                merge_hists(it["inputs"], local, args.hist_workers, tmpdir)
+                copy_to(local, it["target"])
+                os.remove(local)
+            elif it["type"] == "coffea_split":
+                # all inputs in one job: directly the final per-histogram files
+                local = os.path.join(tmpdir, f"item_{i}")
+                merged, keys = merge_in_memory(it["inputs"], args.hist_workers, tmpdir)
+                info = save_split(merged, local)
+                del merged
+                index = {"keys": {}, "other": info["other"], "other_file": key_file(OTHER)}
+                for k, dss in info["hists"].items():
+                    index["keys"][k] = {"file": info["files"][k], "datasets": dss,
+                                        "axes": info["axes"][k]}
+                check_split({s: sorted(map(str, k)) for s, k in keys.items()}, index)
+                with open(os.path.join(local, INDEX), "w") as f:
+                    json.dump(index, f, indent=1)
+                copy_many([(os.path.join(local, f), f"{it['target']}/{f}")
+                           for f in sorted(os.listdir(local)) if f != INDEX])
+                copy_to(os.path.join(local, INDEX), f"{it['target']}/{INDEX}")
+                shutil.rmtree(local, ignore_errors=True)
+            elif it["type"] == "coffea_parts":
+                # stage 1: a chunk of the inputs, one file per histogram + keys.json
+                local = os.path.join(tmpdir, f"item_{i}")
+                merged, keys = merge_in_memory(it["inputs"], args.hist_workers, tmpdir)
+                info = save_split(merged, local)
+                del merged
+                info["inputs"] = {s: sorted(map(str, k)) for s, k in keys.items()}
+                with open(os.path.join(local, "keys.json"), "w") as f:
+                    json.dump(info, f, indent=1)
+                copy_many([(os.path.join(local, f), f"{it['target']}/{f}")
+                           for f in sorted(os.listdir(local)) if f != "keys.json"])
+                # last: keys.json marks the part as complete
+                copy_to(os.path.join(local, "keys.json"), f"{it['target']}/keys.json")
+                shutil.rmtree(local, ignore_errors=True)
+            elif it["type"] == "coffea_keys":
+                merge_key_group(it, tmpdir)
+            print(f"merged {len(it.get('inputs', it.get('parts', [])))} files -> "
+                  f"{it['target']}", flush=True)
         except Exception as err:
             errors.append(f"{it['target']}: {err}")
     return errors
+
+
+def merge_key_group(it, tmpdir):
+    """stage 2 (--split-hists): the histogram keys of group it["group"] (key_group) from
+    the stage-1 parts into it["target"]/<key file>, one key at a time; per key a small json
+    {axes, datasets} in it["meta"] (for the index of the final step), written after the
+    merged file: a retried job skips the keys with a json. The part files of a key are
+    removed once it is done (the rest of the parts directory goes in the final step)."""
+    infos = [(d, read_json(f"{d}/keys.json")) for d in it["parts"]]
+    keys = sorted({k for _, info in infos for k in info["files"]})
+    mine = [k for k in keys if key_group(k, it["ngroups"]) == it["group"]]
+    sums = total_sums([info for _, info in infos])
+    for k in mine:
+        paths = [f"{d}/{info['files'][k]}" for d, info in infos if k in info["files"]]
+        target = f"{it['target']}/{key_file(k)}"
+        meta_path = f"{it['meta']}/{key_file(k)}.json"
+        if remote_exists(meta_path):
+            print(f"  {k}: done earlier, skipped", flush=True)
+            continue
+        t0 = time.time()
+        local = os.path.join(tmpdir, key_file(k))
+        meta = merge_key_files(k, paths, local, sums)
+        copy_to(local, target)
+        os.remove(local)
+        write_json(meta, meta_path, tmpdir)
+        remote_rm(paths)
+        print(f"  {k}: {len(paths)} parts merged ({time.time() - t0:.0f} s)", flush=True)
 
 
 def finalize(spec, tmpdir):
     """Last cascade step: check every final target, write the manifest (targets -> per-job
     inputs, as a merge with this script), remove the intermediate directory."""
     errors = []
+    split = spec.get("split")
+    if split:
+        try:
+            if split.get("parts"):
+                build_split_index(split, tmpdir)
+            elif not remote_exists(f"{split['hists_dir']}/{INDEX}"):
+                errors.append(f"{split['hists_dir']}/{INDEX}: missing")
+        except Exception as err:
+            errors.append(f"{split['hists_dir']}: {err}")
     for target, entries in spec["checks"].items():
         if entries is None:
             if not remote_exists(target):
@@ -416,6 +742,36 @@ def finalize(spec, tmpdir):
     return []
 
 
+def build_split_index(split, tmpdir):
+    """final step of a split merge: check the per-histogram files against the key lists of
+    the stage-1 parts and write hists/index.json"""
+    hdir = split["hists_dir"]
+    infos = [read_json(f"{d}/keys.json") for d in split["parts"]]
+    keys = sorted({k for info in infos for k in info["files"] if k != OTHER})
+    index = {"keys": {}, "other": defaultdict(set), "other_file": key_file(OTHER)}
+    input_keys = defaultdict(set)
+    for info in infos:
+        for ds, k in info["other"].items():
+            index["other"][ds] |= set(k)
+        for ds, k in info.get("inputs", {}).items():
+            input_keys[ds] |= set(k)
+    index["other"] = {ds: sorted(k) for ds, k in index["other"].items()}
+    missing = []
+    for k in keys + [OTHER]:
+        target = f"{hdir}/{key_file(k)}"
+        if not remote_exists(target):
+            missing.append(k)
+            continue
+        if k != OTHER:
+            meta = read_json(f"{split['meta']}/{key_file(k)}.json")
+            index["keys"][k] = dict(meta, file=key_file(k))
+    if missing:
+        raise RuntimeError(f"{len(missing)} merged histogram files missing: {missing[:5]}")
+    check_split(input_keys, index)
+    write_json(index, f"{hdir}/{INDEX}", tmpdir)
+    print(f"{hdir}/{INDEX}: {len(index['keys'])} histograms")
+
+
 def merged_hist_inputs(output_dir, files):
     """Histogram inputs listed in the merge manifests of output_dir."""
     listed = set()
@@ -430,7 +786,7 @@ def merged_hist_inputs(output_dir, files):
                 with open(f) as fin:
                     manifest = json.load(fin)
             for target, inputs in manifest.get("outputs", {}).items():
-                if target.endswith(".coffea"):
+                if target.endswith(".coffea") or target.endswith(f"/{HIST_DIR}"):
                     listed.update(inputs)
     return listed
 
@@ -456,6 +812,11 @@ def main():
     parser.add_argument("--hist-workers", type=int, default=1,
                         help="parallel processes reading the coffea files (memory: one "
                         "partial sum per process)")
+    parser.add_argument("--split-hists", action="store_true",
+                        help="one file per histogram in <output_dir>/hists/ instead of "
+                        "hists_<name>.coffea (memory: one chunk or one histogram at a time)")
+    parser.add_argument("--hist-files-per-chunk", type=int, default=20,
+                        help="--split-hists: coffea files merged per chunk (default: 20)")
     parser.add_argument("--groups", default=None,
                         help="merge only the array groups <syst>/<dataset> matching these "
                         "patterns (split by ',', fnmatch), e.g. 'nominal/TT*'")
@@ -518,7 +879,34 @@ def main():
     try:
         # ---------------------------------------------------------------- histograms
         hist_target = f"{output_dir}/hists_{name}.coffea"
-        if hists and args.only != "arrays":
+        split_index = f"{output_dir}/{HIST_DIR}/{INDEX}"
+        if hists and args.only != "arrays" and args.split_hists:
+            hdir = f"{output_dir}/{HIST_DIR}"
+            if split_index in existing:
+                missing = set(hists.values()) - merged_hist_inputs(output_dir, all_files)
+                if missing:
+                    errors.append(
+                        f"{hdir} exists but does not include {len(missing)} histogram files "
+                        "(jobs finished after the merge?): rerun with -f"
+                    )
+                else:
+                    print(f"exists, complete, skipped (-f to redo): {hdir}/")
+            else:
+                local = os.path.join(tmpdir, HIST_DIR)
+                try:
+                    index = merge_hists_split(list(hists.values()), local,
+                                              args.hist_files_per_chunk, args.hist_workers,
+                                              tmpdir)
+                    copy_many([(os.path.join(local, f), f"{hdir}/{f}")
+                               for f in sorted(os.listdir(local)) if f != INDEX])
+                    copy_to(os.path.join(local, INDEX), split_index)
+                    shutil.rmtree(local, ignore_errors=True)
+                    manifest["outputs"][hdir] = sorted(hists.values())
+                    print(f"merged {len(hists)} histogram files -> {len(index['keys'])} "
+                          f"histogram files in {hdir}/")
+                except Exception as err:
+                    errors.append(f"histograms: {err}")
+        elif hists and args.only != "arrays":
             if hist_target in existing:
                 # merged earlier: all current histogram files must be in it
                 missing = set(hists.values()) - merged_hist_inputs(output_dir, all_files)

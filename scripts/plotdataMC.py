@@ -85,6 +85,41 @@ def jflav_to_stagflav(h):
     return hn
 
 
+def complete_syst_slices(output, is_mc=lambda sample: "Run" not in sample):
+    """Give every MC sample all variations of the syst axis that any MC sample has, per
+    histogram; a variation missing in a sample is its nominal. Variations booked only for
+    some processes (ttbar_weight and hdampML: ttbar, zpt_ewk/wpt_ewk: DY/W+jets) have no
+    syst slice in the other samples, which then counted as 0 in the varied MC sum."""
+    keys = {
+        k for s, hs in output.items() if is_mc(s)
+        for k, h in hs.items() if isinstance(h, hist.Hist) and "syst" in h.axes.name
+    }
+    for key in keys:
+        hs = {s: output[s][key] for s in output
+              if is_mc(s) and isinstance(output[s].get(key), hist.Hist)}
+        labels = []
+        for h in hs.values():
+            labels += [lab for lab in h.axes["syst"] if lab not in labels]
+        for s, h in hs.items():
+            have = list(h.axes["syst"])
+            if "nominal" not in have or all(lab in have for lab in labels):
+                continue
+            iax = h.axes.name.index("syst")
+            sax = h.axes["syst"]
+            new_ax = hist.axis.StrCategory(labels, name=sax.name, label=sax.label,
+                                           growth=sax.traits.growth)
+            axes = list(h.axes)
+            axes[iax] = new_ax
+            hn = hist.Hist(*axes, storage=h.storage_type())
+            old, new = h.view(flow=True), hn.view(flow=True)
+            pre = (slice(None),) * iax
+            for j, lab in enumerate(labels):
+                src = have.index(lab if lab in have else "nominal")
+                new[pre + (j,)] = old[pre + (src,)]
+            output[s][key] = hn
+    return output
+
+
 def _flow_layout(h1d, arr_flow, flow):
     """1D array with all flow bins of the 1D histogram h1d -> the bins as plotted with
     `flow` (none: inner bins, sum: flow added to the first/last bin, show: with flow bins)"""
@@ -406,6 +441,8 @@ def main(args):
     # variables=(): no per-variation renormalised copies (<hist>_<variation>) for outputs
     # without sumw_<variation>; the plots use the syst axis
     output = scaleSumW(output, args.lumi, variables=())
+    # variations of some processes only: the nominal for the others (syst band)
+    output = complete_syst_slices(output)
 
     mergemap = {}
     ## create merge map from sample set/data MC

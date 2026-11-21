@@ -11,9 +11,15 @@ plotdataMC.py can draw are written: one (or two) axes left besides syst, flav/jf
 and category. Inputs: local paths, /eos paths (read as root:// URLs) or root:// URLs;
 outdir: local or /eos (written locally first, then copied with xrdcp).
 
+Merged outputs with one file per histogram (E_merge_stag.sh / mergeoutputs.py --split-hists,
+<outputDir>/hists/) need no split: --from-index lists the plottable histograms of their
+index.json files (--list), the plot jobs read the per-histogram files directly.
+
 Example
 -------
     python scripts/split_coffea.py "$B/e_DY/*/hists_e_DY_*.coffea" -o $B/e_DY/plot_split \\
+        --list vars_e_DY.txt
+    python scripts/split_coffea.py --from-index $B/e_DY/MC/hists,$B/e_DY/data/hists \\
         --list vars_e_DY.txt
 """
 
@@ -73,25 +79,72 @@ def expand(patterns):
     return files
 
 
+def plottable_axes(names):
+    left = [a for a in names if a not in SPECIAL_AXES]
+    return 1 <= len(left) <= 2
+
+
 def plottable(h):
     import hist
 
     if not isinstance(h, hist.Hist):
         return False
-    left = [a for a in h.axes.name if a not in SPECIAL_AXES]
-    return 1 <= len(left) <= 2
+    return plottable_axes(h.axes.name)
+
+
+def read_index(hdir):
+    """index.json of a per-histogram directory (mergeoutputs.py --split-hists)"""
+    import json
+
+    url = xrootd_url(hdir.rstrip("/") + "/index.json")
+    if url.startswith("root://"):
+        import fsspec
+
+        with fsspec.open(url, "r") as fin:
+            return json.load(fin)
+    with open(url) as fin:
+        return json.load(fin)
+
+
+def select(keys, variables):
+    if variables == "all":
+        return sorted(keys)
+    pats = [x for x in variables.split(",") if x]
+    return sorted(k for k in keys if any(fnmatch.fnmatch(k, x) for x in pats))
 
 
 def main():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("files", nargs="+", help="coffea files (wildcards, or split by ',')")
-    p.add_argument("-o", "--outdir", required=True, help="output directory (local or /eos)")
+    p.add_argument("files", nargs="*", help="coffea files (wildcards, or split by ',')")
+    p.add_argument("-o", "--outdir", help="output directory (local or /eos)")
+    p.add_argument("--from-index", default=None,
+                   help="per-histogram directories (hists/ of mergeoutputs.py --split-hists, "
+                   "split by ','): only list their plottable histograms (--list)")
     p.add_argument("-v", "--variables", default="all",
                    help="histograms, split by ',' (wildcards); default all")
     p.add_argument("--list", default=None, help="write the variable names to this file")
     p.add_argument("-j", "--jobs", type=int, default=8, help="parallel copies to EOS")
     args = p.parse_args()
+
+    if args.from_index:
+        keys = set()
+        for d in [x for x in args.from_index.split(",") if x]:
+            idx = read_index(d)
+            keys |= {k for k, m in idx["keys"].items() if m.get("axes") and
+                     plottable_axes(m["axes"])}
+        keys = select(keys, args.variables)
+        if not keys:
+            raise SystemExit("no plottable histogram selected")
+        print(f"{len(keys)} plottable histograms in {args.from_index}")
+        if args.list:
+            with open(args.list, "w") as f:
+                f.write("\n".join(keys) + "\n")
+        else:
+            print("\n".join(keys))
+        return 0
+    if not args.files or not args.outdir:
+        p.error("files and -o/--outdir are required (unless --from-index)")
 
     from coffea.util import save
 
@@ -114,10 +167,8 @@ def main():
                         pass
         del out
 
-    keys = sorted({k for d in merged.values() for k, v in d.items() if plottable(v)})
-    if args.variables != "all":
-        pats = [x for x in args.variables.split(",") if x]
-        keys = [k for k in keys if any(fnmatch.fnmatch(k, x) for x in pats)]
+    keys = select({k for d in merged.values() for k, v in d.items() if plottable(v)},
+                  args.variables)
     if not keys:
         raise SystemExit("no plottable histogram selected")
 

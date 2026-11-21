@@ -1,12 +1,13 @@
 #!/bin/bash -xe
 # Condor job of submit_plots.py: scripts/plotdataMC.py for one histogram, with the conda
 # environment and the code from the sandbox tarballs (as execute.sh), nothing read from AFS.
-#   plot_job.sh <variable> <phase> <input dir URL> <output dir URL>
+#   plot_job.sh <variable> <phase> <file with the input dir URLs> <output dir URL>
+# Input: <input dir URL>/<variable>.coffea of every input directory that has it.
 # Further plotdataMC.py options: plot_opts.txt (one argument per line).
 
 VAR=$1
 PHASE=$2
-INURL=$3
+INDIRS=$3
 OUTURL=$4
 
 WORKDIR=$(pwd)
@@ -40,16 +41,28 @@ export PYTHONPATH=$WORKDIR/code/src
 export PYTHONDONTWRITEBYTECODE=1
 export X509_USER_PROXY=${X509_USER_PROXY:-$WORKDIR/proxy}
 
-# input: the file of this histogram (split_coffea.py)
-xrdcp -f "$INURL/$VAR.coffea" $WORKDIR/$VAR.coffea || setup_failed "xrdcp $INURL/$VAR.coffea"
+# input: the file of this histogram in each input directory (split_coffea.py: one directory;
+# mergeoutputs.py --split-hists: one per sample list)
+mapfile -t URLS < $WORKDIR/$INDIRS
+INPUTS=()
+for i in "${!URLS[@]}"; do
+    u=${URLS[$i]}
+    [ -n "$u" ] || continue
+    host=${u#root://}; host=${host%%/*}; path=/${u#root://*/}
+    xrdfs root://$host stat "$path/$VAR.coffea" >/dev/null 2>&1 || continue
+    xrdcp -f "$u/$VAR.coffea" $WORKDIR/in_${i}_$VAR.coffea || setup_failed "xrdcp $u/$VAR.coffea"
+    INPUTS+=($WORKDIR/in_${i}_$VAR.coffea)
+done
+[ "${#INPUTS[@]}" -gt 0 ] || setup_failed "no input file $VAR.coffea"
+INLIST=$(IFS=,; echo "${INPUTS[*]}")
 mapfile -t OPTS < $WORKDIR/plot_opts.txt
 
 # the framework opens some files relative to the repository directory
 cd $WORKDIR/code
 mkdir -p $WORKDIR/plots
-python $WORKDIR/plotdataMC.py -p "$PHASE" -i $WORKDIR/$VAR.coffea -v "$VAR" \
+python $WORKDIR/plotdataMC.py -p "$PHASE" -i "$INLIST" -v "$VAR" \
     -o $WORKDIR/plots "${OPTS[@]}"
-rm -f $WORKDIR/$VAR.coffea
+rm -f "${INPUTS[@]}"
 
 # output: the plots of this histogram
 n=0

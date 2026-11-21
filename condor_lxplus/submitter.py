@@ -211,6 +211,13 @@ def get_condor_submitter_parser(parser):
         help="request_disk per job (unpacked environment + outputs). Default: %(default)s",
     )
     parser.add_argument(
+        "--memory",
+        type=int,
+        default=None,
+        help="request_memory per job in MB (default: not set, the lxplus default of "
+        "2000 MB per CPU). Above 2000 MB per CPU the jobs wait longer for a slot.",
+    )
+    parser.add_argument(
         "--noSandbox",
         action="store_true",
         help="Run the jobs from this checkout and conda environment directly (shared "
@@ -517,6 +524,7 @@ Arguments = $(JOBNUM) {base_dir} {outputDir} {envpath} {nthreads}
 
 request_cpus = {nthreads}
 request_disk = {disk}
+{memory}
 max_materialize = {max_running}
 
 +JobFlavour = "{job_flavour}"
@@ -552,6 +560,7 @@ Queue JOBNUM from {jobnum_file}
         log_dir=f"{job_dir}/log",
         transfer_input_files=",".join(transfer_inputs),
         disk=args.disk,
+        memory=f"request_memory = {args.memory}" if args.memory else "",
         batch_name=args.jobName,
         job_flavour=args.jobFlavour,
         max_running=args.maxRunning,
