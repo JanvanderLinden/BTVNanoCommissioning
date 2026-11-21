@@ -13,17 +13,18 @@ errband_opts = {
 }
 markers = [".", "o", "^", "s", "+", "x", "D", "*"]
 color_map = {
-    # https://cms-analysis.docs.cern.ch/guidelines/plotting/colors/
-    "$t\\bar{t}$": "#86c8dd",
-    "Single top": "#578dff",
-    "tt+X": "#1845fb",
-    "VV": "#c91f16",
-    "W+jets": "#c849a9",
-    "Z+jets": "#ff5e02",
-    "DY": "#ff5e02",
-    "QCD": "#adad7d",
-    "QCD($\\mu$)": "#656364",
-    "Ph+jets": "#f2ab6d",
+    # processes (sample split): top greys, DY purple, W+jets yellow, VV olive (as the VH
+    # analysis plots)
+    "$t\\bar{t}$": "#9c9ca1",
+    "Single top": "#717581",
+    "tt+X": "#3D3E3F",
+    "VV": "#b9ac70",
+    "W+jets": "#fcb302",
+    "Z+jets": "#9467bd",
+    "DY": "#9467bd",
+    "QCD": "#3f90da",
+    "QCD($\\mu$)": "#92dadd",
+    "Ph+jets": "#a1c4a4",
     # flavour splits: (udsg, c, b, PU) / (uds, g, c, b, PU) / (ud, s, g, c, b, PU)
     "udsg": "#c6c8cd",  # light grey
     "uds": "#c6c8cd",
@@ -324,6 +325,22 @@ sample_mergemap = {
         "GJ-4Jets_dRGJ-0p25_PTG-200_HT-600to1000_TuneCP5_13p6TeV_madgraphMLM-pythia8",
     ],
 }
+# Z+jets and DY hold the same Drell-Yan samples: one group (a sample in two groups is
+# stacked twice)
+sample_mergemap["DY"] = sample_mergemap.pop("Z+jets") + sample_mergemap["DY"]
+
+
+def disjoint_mergemap(mergemap):
+    """Copy of a sample merge map in which every sample belongs to its first group only
+    (and appears once): a sample listed in two groups would be counted twice in the stack."""
+    seen, out = set(), {}
+    for group, names in mergemap.items():
+        out[group] = [n for n in dict.fromkeys(names) if n not in seen]
+        seen.update(out[group])
+    return out
+
+
+sample_mergemap = disjoint_mergemap(sample_mergemap)
 ### copy functions coffea.hist.plotratio https://github.com/CoffeaTeam/coffea/blob/master/coffea/hist/plot.py to boost-hist
 ################
 ## ratio plot ##
