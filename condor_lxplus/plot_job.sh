@@ -78,3 +78,4 @@ for f in $WORKDIR/plots/*; do
 done
 rm -rf $WORKDIR/plots
 echo "$n files copied to $OUTURL"
+[ $n -gt 0 ] || echo "WARNING: no plot of $VAR: skipped by plotdataMC.py, the reason is in the out file of this job" >&2

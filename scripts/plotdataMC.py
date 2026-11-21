@@ -465,6 +465,7 @@ def main(args):
         mergemap["data"] = datalist
 
     mc_only = args.mc_only or not mergemap["data"]
+    mc_only_all = mc_only  # per variable: also MC only if the data histogram is empty
     if mc_only:
         if not args.mc_only:
             print("No data in the inputs: MC-only plots")
@@ -601,6 +602,7 @@ def main(args):
     syst_exclude = [p for p in args.syst_exclude.split(",") if p]
 
     for index, discr in enumerate(var_set):
+        mc_only = mc_only_all
         # text box of this plot: phase-space label (+ jet pT bin of pT-binned discriminants)
         var_txt = input_txt
         # Skip non-histogram objects
@@ -618,12 +620,13 @@ def main(args):
         ):
             print(discr, "not in files, skipping")
             continue
-        elif (collated["mc"][discr].values(flow=check_flow) == 0).all() or (
-            not mc_only
-            and (collated["data"][discr].values(flow=check_flow) == 0).all()
-        ):
-            print(discr, "is empty, skipping")
+        elif (collated["mc"][discr].values(flow=check_flow) == 0).all():
+            print(discr, "is empty in MC, skipping")
             continue
+        elif not mc_only and (collated["data"][discr].values(flow=check_flow) == 0).all():
+            # e.g. generator-level histograms (top pT): drawn for the MC alone
+            print(discr, "is empty in data: MC-only plot")
+            mc_only = True
 
         ## additional legend info
         if "2Dbin_pt" in discr or "HFvLF_pt" in discr or "BvC_pt" in discr:
