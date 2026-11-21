@@ -19,6 +19,11 @@ file per histogram, --key-groups stage-2 jobs merge the histograms (each job the
 of its group, one after the other), the final job checks them and writes hists/index.json.
 No job holds more than one chunk or one merged histogram in memory.
 
+--resplit: no merge, the existing hists_<name>.coffea of each task is split into one file per
+histogram (hists/, as --split-hists), one job per file, which needs the memory of the whole
+file (--memory, with --cpus = memory / 2000 MB to match the standard slots); for merges whose
+per-job files are already deleted.
+
 The final files and the manifest are those of mergeoutputs.py, so a later interactive
 mergeoutputs.py (or E_merge_stag.sh) run finds them complete and, with --delete-inputs,
 removes the per-job files. Nothing per-job is deleted by the jobs. Files that are already
@@ -64,6 +69,21 @@ def plan_task(output_dir, name, only, args):
     s1, s2 = [], []
     spec = {"output_dir": output_dir, "outputs": {}, "checks": {}, "tmp": tmp}
     skipped = 0
+
+    if args.resplit:
+        # existing hists_<name>.coffea -> hists/<histogram>.coffea (no per-job files needed)
+        single = f"{output_dir}/hists_{name}.coffea"
+        hdir = f"{output_dir}/{mo.HIST_DIR}"
+        if single not in existing:
+            print(f"WARNING: {single} not found, nothing to split")
+        elif f"{hdir}/{mo.INDEX}" in existing and not args.force:
+            skipped += 1
+        else:
+            s1.append({"type": "coffea_resplit", "target": hdir, "inputs": [single],
+                       "entries": None})
+            spec["split"] = {"hists_dir": hdir, "parts": None}
+            spec["outputs"][hdir] = [single]
+        return s1, s2, spec, skipped, int(single in existing), 0
 
     if hists and only in ("all", "hists") and args.split_hists:
         hdir = f"{output_dir}/{mo.HIST_DIR}"
@@ -176,6 +196,10 @@ def main():
     p.add_argument("--key-groups", type=int, default=16,
                    help="--split-hists: stage-2 jobs per output directory, each merging "
                    "the histograms of its group (default: 16)")
+    p.add_argument("--resplit", action="store_true",
+                   help="no merge: split the existing hists_<name>.coffea of each task into "
+                   "one file per histogram (hists/, as --split-hists), one job per file; "
+                   "for merges whose per-job files are deleted. Memory: the whole file")
     p.add_argument("--root-files-per-job", type=int, default=50,
                    help="ROOT files merged per stage-1 job (default: 50)")
     p.add_argument("--root-items-per-job", type=int, default=10,
@@ -255,10 +279,10 @@ def main():
     accounting = f'+AccountingGroup = "{args.accountingGroup}"' if args.accountingGroup else ""
     sub = f"""Universe   = vanilla
 Executable = {job_dir}/merge_job.sh
-Arguments  = $(mode) $(node).json {args.cpus} {args.hadd_threads} {args.cpus} {int(args.force)}
+Arguments  = $(mode) $(node).json $(cpus) {args.hadd_threads} $(cpus) {int(args.force)}
 
-request_cpus   = {args.cpus}
-request_memory = {memory}
+request_cpus   = $(cpus)
+request_memory = $(mem)
 request_disk   = {args.disk}
 +JobFlavour = "{args.jobFlavour}"
 {accounting}
@@ -280,7 +304,10 @@ Queue
         f.write(sub)
     lines = []
     for node, mode in dag_nodes:
-        lines += [f"JOB {node} merge.sub", f'VARS {node} mode="{mode}" node="{node}"',
+        # the final step (checks, manifest) needs little
+        cpus, mem = (args.cpus, memory) if mode == "items" else (1, 2000)
+        lines += [f"JOB {node} merge.sub",
+                  f'VARS {node} mode="{mode}" node="{node}" cpus="{cpus}" mem="{mem}"',
                   f"RETRY {node} 2"]
     for parents, children in dag_deps:
         lines.append(f"PARENT {' '.join(parents)} CHILD {' '.join(children)}")

@@ -644,21 +644,13 @@ def run_items(items, args, tmpdir):
                 os.remove(local)
             elif it["type"] == "coffea_split":
                 # all inputs in one job: directly the final per-histogram files
-                local = os.path.join(tmpdir, f"item_{i}")
                 merged, keys = merge_in_memory(it["inputs"], args.hist_workers, tmpdir)
-                info = save_split(merged, local)
-                del merged
-                index = {"keys": {}, "other": info["other"], "other_file": key_file(OTHER)}
-                for k, dss in info["hists"].items():
-                    index["keys"][k] = {"file": info["files"][k], "datasets": dss,
-                                        "axes": info["axes"][k]}
-                check_split({s: sorted(map(str, k)) for s, k in keys.items()}, index)
-                with open(os.path.join(local, INDEX), "w") as f:
-                    json.dump(index, f, indent=1)
-                copy_many([(os.path.join(local, f), f"{it['target']}/{f}")
-                           for f in sorted(os.listdir(local)) if f != INDEX])
-                copy_to(os.path.join(local, INDEX), f"{it['target']}/{INDEX}")
-                shutil.rmtree(local, ignore_errors=True)
+                write_split(merged, keys, os.path.join(tmpdir, f"item_{i}"), it["target"])
+            elif it["type"] == "coffea_resplit":
+                # an existing single merged file (hists_<name>.coffea) -> per-histogram files
+                merged = load_coffea(it["inputs"][0])
+                write_split(merged, count_hists(merged), os.path.join(tmpdir, f"item_{i}"),
+                            it["target"])
             elif it["type"] == "coffea_parts":
                 # stage 1: a chunk of the inputs, one file per histogram + keys.json
                 local = os.path.join(tmpdir, f"item_{i}")
@@ -680,6 +672,24 @@ def run_items(items, args, tmpdir):
         except Exception as err:
             errors.append(f"{it['target']}: {err}")
     return errors
+
+
+def write_split(merged, keys, local, target):
+    """`merged` (all histograms) -> one file per histogram + index.json in target; `keys`:
+    the (dataset, key) entries that have to be there. `merged` is emptied (memory)."""
+    info = save_split(merged, local)
+    merged.clear()
+    index = {"keys": {}, "other": info["other"], "other_file": key_file(OTHER)}
+    for k, dss in info["hists"].items():
+        index["keys"][k] = {"file": info["files"][k], "datasets": dss, "axes": info["axes"][k]}
+    check_split({s: sorted(map(str, k)) for s, k in keys.items()}, index)
+    with open(os.path.join(local, INDEX), "w") as f:
+        json.dump(index, f, indent=1)
+    copy_many([(os.path.join(local, f), f"{target}/{f}")
+               for f in sorted(os.listdir(local)) if f != INDEX])
+    # last: index.json marks the directory as complete
+    copy_to(os.path.join(local, INDEX), f"{target}/{INDEX}")
+    shutil.rmtree(local, ignore_errors=True)
 
 
 def merge_key_group(it, tmpdir):

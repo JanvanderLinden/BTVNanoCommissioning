@@ -83,7 +83,10 @@ writes the merge manifest and removes `.merge_tmp/`. `--split-hists`: the stage-
 their chunk as one file per histogram, `--key-groups` stage-2 jobs per output directory
 (default 16) merge the histograms of their group one by one into `hists/`, the final job
 checks them against the histogram lists of the stage-1 jobs and writes `hists/index.json`;
-no job holds more than one chunk or one merged histogram (`--memory`: for the largest). Each node runs `merge_job.sh`
+no job holds more than one chunk or one merged histogram (`--memory`: for the largest).
+`--resplit` (task `<outputDir> <name> hists`): no merge, the existing `hists_<name>.coffea` is
+split into `hists/` by one job (memory: the whole file), for merges whose per-job files are
+deleted. The final job of each output directory requests 1 core and 2000 MB. Each node runs `merge_job.sh`
 (mergeoutputs.py `--items` / `--finalize`) with the conda-pack tarball of the active
 environment from the sandbox directory (as `submitter.py`), reads from EOS with root:// and
 writes with xrdcp; failed nodes are retried twice, completed outputs are skipped on a retry.
